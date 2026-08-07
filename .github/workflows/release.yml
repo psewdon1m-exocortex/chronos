@@ -1,0 +1,156 @@
+name: Release Chronos
+
+on:
+  push:
+    tags:
+      - "chronos-v*"
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  UPDATER_REPOSITORY: ${{ vars.UPDATER_REPOSITORY || 'psewdon1m-exocortex/updater' }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: chronos_test
+          POSTGRES_USER: chronos
+          POSTGRES_PASSWORD: test-database-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chronos -d chronos_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.9.0"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve version
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#chronos-v}"
+          [[ "$GITHUB_REF_NAME" == "chronos-v${version}" ]]
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Test and build
+        env:
+          TEST_DATABASE_URL: postgresql://chronos:test-database-password@127.0.0.1:5432/chronos_test
+        shell: bash
+        run: |
+          sh -n bootstrap.sh install.sh
+          pip install -r requirements-dev.txt
+          pytest
+          cd web
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm build
+
+      - name: Download and verify pinned Updater
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_READ_TOKEN || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          updater_version="$(tr -d '[:space:]' < .release/updater.version)"
+          mkdir -p .release-inputs
+          gh release download "updater-v${updater_version}" \
+            --repo "$UPDATER_REPOSITORY" --dir .release-inputs \
+            --pattern "updater-${updater_version}-install.tar.gz" \
+            --pattern "updater-${updater_version}-install.tar.gz.sha256"
+          (cd .release-inputs && sha256sum -c "updater-${updater_version}-install.tar.gz.sha256")
+          tar -xzf ".release-inputs/updater-${updater_version}-install.tar.gz" -C .release-inputs
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and smoke-test image
+        shell: bash
+        run: |
+          image="release-candidate-chronos:${GITHUB_SHA}"
+          docker buildx build --tag "$image" --load .
+          docker network create chronos-release-test
+          docker run -d --name chronos-release-db --network chronos-release-test \
+            -e POSTGRES_DB=chronos -e POSTGRES_USER=chronos \
+            -e POSTGRES_PASSWORD=release-database-password postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+          trap 'docker rm -f release-smoke-chronos chronos-release-db >/dev/null 2>&1 || true; docker network rm chronos-release-test >/dev/null 2>&1 || true' EXIT
+          for _ in {1..30}; do
+            docker exec chronos-release-db pg_isready -U chronos -d chronos && break
+            sleep 2
+          done
+          docker run -d --name release-smoke-chronos --network chronos-release-test \
+            -e CHRONOS_LISTEN_PORT=18280 \
+            -e CHRONOS_DATA_DIR=/tmp/chronos-data \
+            -e CHRONOS_ADMIN_USERNAME=release-operator \
+            -e CHRONOS_ADMIN_PASSWORD=release-test-password \
+            -e CHRONOS_SESSION_SECRET=release-test-session-secret-32-characters \
+            -e DATABASE_URL=postgresql://chronos:release-database-password@chronos-release-db:5432/chronos \
+            -e CHRONOS_COOKIE_SECURE=false "$image"
+          for _ in {1..45}; do
+            status="$(docker inspect --format '{{.State.Health.Status}}' release-smoke-chronos)"
+            [[ "$status" == healthy ]] && break
+            [[ "$status" == unhealthy ]] && docker logs release-smoke-chronos && exit 1
+            sleep 2
+          done
+          [[ "$(docker inspect --format '{{.State.Health.Status}}' release-smoke-chronos)" == healthy ]]
+
+      - name: Publish immutable image
+        id: image
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx build --tag "${image}:${{ steps.release.outputs.version }}" \
+            --tag "${image}:latest" --push --provenance=true --sbom=true \
+            --metadata-file image-metadata.json .
+          digest="$(jq -er '."containerimage.digest"' image-metadata.json)"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "reference=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        env:
+          IMAGE_REFERENCE: ${{ steps.image.outputs.reference }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          updater_version="$(tr -d '[:space:]' < .release/updater.version)"
+          UPDATER_BUNDLE_DIR="$PWD/.release-inputs/updater" \
+          UPDATER_BUNDLE_VERSION="$updater_version" \
+            bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
+
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "release-artifacts/*"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-artifacts/* \
+            --verify-tag --latest=false --generate-notes \
+            --title "Chronos ${{ steps.release.outputs.version }}"

@@ -1,0 +1,9 @@
+services:
+  chronos:
+    volumes:
+      - type: bind
+        source: "${UPDATER_SOCKET_DIR:-/run/exocortex}"
+        target: /run/exocortex
+    group_add:
+      - "${UPDATER_SOCKET_GID:?Set UPDATER_SOCKET_GID during VPS installation}"
+

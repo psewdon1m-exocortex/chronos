@@ -1,0 +1,85 @@
+name: chronos
+
+services:
+  db:
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    container_name: exocortex-chronos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chronos
+      POSTGRES_USER: chronos
+      POSTGRES_PASSWORD: "${CHRONOS_DB_PASSWORD:?Set CHRONOS_DB_PASSWORD in .env}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chronos -d chronos"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - chronos-db:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  chronos:
+    image: "${CHRONOS_IMAGE:?Set CHRONOS_IMAGE to the published immutable image in .env}"
+    container_name: exocortex-chronos
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${CHRONOS_LISTEN_PORT:-18280}:${CHRONOS_LISTEN_PORT:-18280}"
+    environment:
+      CHRONOS_LISTEN_PORT: "${CHRONOS_LISTEN_PORT:-18280}"
+      CHRONOS_DATA_DIR: /app/data
+      CHRONOS_VERSION: "${CHRONOS_VERSION:-0.1.0}"
+      CHRONOS_ADMIN_USERNAME: "${CHRONOS_ADMIN_USERNAME:?Set CHRONOS_ADMIN_USERNAME in .env}"
+      CHRONOS_ADMIN_PASSWORD: "${CHRONOS_ADMIN_PASSWORD:?Set CHRONOS_ADMIN_PASSWORD in .env}"
+      CHRONOS_SESSION_SECRET: "${CHRONOS_SESSION_SECRET:?Set CHRONOS_SESSION_SECRET in .env}"
+      CHRONOS_COOKIE_SECURE: "${CHRONOS_COOKIE_SECURE:-true}"
+      CHRONOS_TRUST_PROXY: "${CHRONOS_TRUST_PROXY:-true}"
+      CHRONOS_TELEGRAM_BOT_TOKEN: "${CHRONOS_TELEGRAM_BOT_TOKEN:-}"
+      CHRONOS_REPOSITORY_URL: "${CHRONOS_REPOSITORY_URL:-}"
+      CHRONOS_PUBLIC_URL: "${CHRONOS_PUBLIC_URL:-}"
+      DATABASE_URL: "postgresql://chronos:${CHRONOS_DB_PASSWORD:?Set CHRONOS_DB_PASSWORD in .env}@db:5432/chronos"
+      TZ: "${TZ:-UTC}"
+      KERNEL_URL: "${KERNEL_URL:?Set KERNEL_URL in .env}"
+      KERNEL_SERVICE_TOKEN: "${KERNEL_SERVICE_TOKEN:?Set KERNEL_SERVICE_TOKEN in .env}"
+      KERNEL_CACHE_PATH: /app/data/kernel-cache/register.snapshot.json
+      KERNEL_TIMEOUT_SEC: "${KERNEL_TIMEOUT_SEC:-3}"
+      KERNEL_REFRESH_SEC: "${KERNEL_REFRESH_SEC:-60}"
+      CHRONOS_AUDIT_MAX_ENTRIES: "${CHRONOS_AUDIT_MAX_ENTRIES:-10000}"
+      CHRONOS_AUDIT_RETENTION_DAYS: "${CHRONOS_AUDIT_RETENTION_DAYS:-30}"
+      CHRONOS_UPDATE_CHECK_TIMEOUT_SEC: "${CHRONOS_UPDATE_CHECK_TIMEOUT_SEC:-5}"
+      UPDATER_SOCKET_PATH: /run/exocortex/updater.sock
+      UPDATER_HEAD_ID: "${UPDATER_HEAD_ID:-chronos}"
+      UPDATER_CONTROL_TOKEN: "${UPDATER_CONTROL_TOKEN:?Set UPDATER_CONTROL_TOKEN in .env}"
+    volumes:
+      - chronos-data:/app/data
+      - type: bind
+        source: "${UPDATER_SOCKET_DIR:-/run/exocortex}"
+        target: /run/exocortex
+    group_add:
+      - "${UPDATER_SOCKET_GID:?Set UPDATER_SOCKET_GID during VPS installation}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  chronos-db:
+  chronos-data:

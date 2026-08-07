@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.data
+.tmp
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+web/node_modules
+web/dist
+release-artifacts
+test-results
+
