@@ -63,7 +63,7 @@ jobs:
         run: |
           sh -n bootstrap.sh install.sh
           pip install -r requirements-dev.txt
-          pytest
+          PYTHONPATH=. pytest
           cd web
           pnpm install --frozen-lockfile
           pnpm test
