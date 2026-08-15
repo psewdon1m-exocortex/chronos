@@ -15,6 +15,7 @@ export interface Session {
   started_at: string;
   stopped_at: string | null;
   duration_seconds: number;
+  timer_elapsed_seconds: number;
   note: string;
   source: "telegram" | "web" | "manual" | "restore";
   active: boolean;

@@ -121,7 +121,7 @@ async def test_retype_changes_only_the_last_completed_session(store) -> None:
     assert categories[second["id"]] == "accumulation"
 
 
-async def test_backfill_trims_and_removes_overlapped_sessions_and_can_be_undone(store) -> None:
+async def test_backfill_without_active_timer_creates_only_a_completed_session(store) -> None:
     service = TimerService(store)
     base = datetime(2026, 8, 5, 8, 0, tzinfo=timezone.utc)
     first = await service.create_manual(
@@ -139,7 +139,7 @@ async def test_backfill_trims_and_removes_overlapped_sessions_and_can_be_undone(
         actor="test",
     )
 
-    result = await service.backfill_active(
+    result = await service.backfill_completed(
         "recovery",
         90,
         actor="test",
@@ -147,16 +147,19 @@ async def test_backfill_trims_and_removes_overlapped_sessions_and_can_be_undone(
         now=base + timedelta(hours=2),
     )
 
-    assert result["started"]["started_at"] == (base + timedelta(minutes=30)).isoformat()
-    assert result["started"]["active"] is True
+    assert result["created"]["started_at"] == (base + timedelta(minutes=30)).isoformat()
+    assert result["created"]["stopped_at"] == (base + timedelta(hours=2)).isoformat()
+    assert result["created"]["active"] is False
+    assert result["active"] is None
+    assert await service.active(now=base + timedelta(hours=2)) is None
     assert result["trimmed_ids"] == [first["public_id"]]
     assert result["deleted_ids"] == [second["public_id"]]
     history = await service.history(
         start=None, end=None, category=None, query="", limit=10, offset=0
     )
-    assert result["started"]["duration_seconds"] == 5400
+    assert result["created"]["duration_seconds"] == 5400
     assert [item["public_id"] for item in history["items"]] == [
-        result["started"]["public_id"],
+        result["created"]["public_id"],
         first["public_id"],
     ]
     assert history["items"][1]["duration_seconds"] == 1800
@@ -169,6 +172,142 @@ async def test_backfill_trims_and_removes_overlapped_sessions_and_can_be_undone(
         first["public_id"],
         second["public_id"],
     }
+
+
+async def test_backfill_deducts_partial_overlap_and_continues_active_timer(store) -> None:
+    service = TimerService(store)
+    base = datetime(2026, 8, 5, 8, 0, tzinfo=timezone.utc)
+    started = await service.press(
+        "execution", actor="test", source="telegram", now=base
+    )
+    current = base + timedelta(hours=2)
+
+    result = await service.backfill_completed(
+        "recovery",
+        50,
+        actor="test",
+        source="telegram",
+        now=current,
+    )
+
+    assert result["created"]["active"] is False
+    assert result["created"]["duration_seconds"] == 3000
+    assert result["active"]["category"] == "execution"
+    assert result["active"]["duration_seconds"] == 0
+    assert result["active"]["timer_elapsed_seconds"] == 4200
+    active_later = await service.active(now=current + timedelta(minutes=10))
+    assert active_later and active_later["timer_elapsed_seconds"] == 4800
+
+    analytics = await service.analytics(
+        base,
+        current + timedelta(minutes=10),
+        now=current + timedelta(minutes=10),
+    )
+    totals = {item["category"]: item["seconds"] for item in analytics["categories"]}
+    assert totals["execution"] == 4800
+    assert totals["recovery"] == 3000
+
+    await service.undo(actor="test")
+    restored = await service.active(now=current)
+    assert restored
+    assert restored["public_id"] == started["started"]["public_id"]
+    assert restored["timer_elapsed_seconds"] == 7200
+
+
+async def test_backfill_resets_fully_overlapped_active_timer_to_zero(store) -> None:
+    service = TimerService(store)
+    current = datetime(2026, 8, 5, 10, 0, tzinfo=timezone.utc)
+    started = await service.press(
+        "maintenance",
+        actor="test",
+        source="telegram",
+        now=current - timedelta(minutes=15),
+    )
+
+    result = await service.backfill_completed(
+        "accumulation",
+        30,
+        actor="test",
+        source="telegram",
+        now=current,
+    )
+
+    assert result["created"]["duration_seconds"] == 1800
+    assert result["active"]["category"] == "maintenance"
+    assert result["active"]["timer_elapsed_seconds"] == 0
+    assert result["deleted_ids"] == [started["started"]["public_id"]]
+
+
+async def test_backfill_preserves_both_sides_of_a_spanning_completed_session(store) -> None:
+    service = TimerService(store)
+    base = datetime(2026, 8, 5, 8, 0, tzinfo=timezone.utc)
+    original = await service.create_manual(
+        category="execution",
+        started_at=base,
+        stopped_at=base + timedelta(hours=3),
+        note="Spanning session",
+        actor="test",
+    )
+
+    result = await service.backfill_completed(
+        "recovery",
+        60,
+        actor="test",
+        source="telegram",
+        now=base + timedelta(hours=2),
+    )
+
+    assert result["active"] is None
+    history = await service.history(
+        start=None, end=None, category=None, query="", limit=10, offset=0
+    )
+    assert [item["duration_seconds"] for item in history["items"]] == [3600, 3600, 3600]
+    assert [item["category"] for item in history["items"]] == [
+        "execution",
+        "recovery",
+        "execution",
+    ]
+
+    await service.undo(actor="test")
+    restored = await service.history(
+        start=None, end=None, category=None, query="", limit=10, offset=0
+    )
+    assert len(restored["items"]) == 1
+    assert restored["items"][0]["public_id"] == original["public_id"]
+    assert restored["items"][0]["duration_seconds"] == 10800
+
+
+async def test_repeated_backfill_deducts_earlier_segments_of_the_active_timer(store) -> None:
+    service = TimerService(store)
+    base = datetime(2026, 8, 5, 8, 0, tzinfo=timezone.utc)
+    await service.press("execution", actor="test", source="telegram", now=base)
+    await service.backfill_completed(
+        "recovery",
+        50,
+        actor="test",
+        source="telegram",
+        now=base + timedelta(hours=2),
+    )
+
+    result = await service.backfill_completed(
+        "accumulation",
+        90,
+        actor="test",
+        source="telegram",
+        now=base + timedelta(hours=2, minutes=30),
+    )
+
+    assert result["active"]["category"] == "execution"
+    assert result["active"]["timer_elapsed_seconds"] == 3600
+    analytics = await service.analytics(
+        base,
+        base + timedelta(hours=2, minutes=30),
+        now=base + timedelta(hours=2, minutes=30),
+    )
+    totals = {item["category"]: item["seconds"] for item in analytics["categories"]}
+    assert totals["execution"] == 3600
+    assert totals["recovery"] == 0
+    assert totals["accumulation"] == 5400
 
 
 async def test_analytics_clips_sessions_to_period_boundaries(store) -> None:

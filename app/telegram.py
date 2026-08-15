@@ -150,7 +150,7 @@ class TelegramSupervisor:
                     BotCommand(command="stop", description="Stop the active timer"),
                     BotCommand(command="undo", description="Undo the last timer action"),
                     BotCommand(command="retype", description="Change the last completed session"),
-                    BotCommand(command="backfill", description="Start a timer in the past"),
+                    BotCommand(command="backfill", description="Insert a completed past session"),
                     BotCommand(command="link", description="Link this Telegram account"),
                 ]
             )
@@ -261,7 +261,8 @@ class TelegramSupervisor:
                 await message.answer("No timer is active.", reply_markup=keyboard())
                 return
             await message.answer(
-                f"Active: {active['label']}\nElapsed: {format_duration(active['duration_seconds'])}",
+                f"Active: {active['label']}\nElapsed: "
+                f"{format_duration(active['timer_elapsed_seconds'])}",
                 reply_markup=keyboard(),
             )
 
@@ -308,7 +309,7 @@ class TelegramSupervisor:
                 return
             await message.answer(
                 f"Stopped {stopped['public_id']} ({stopped['label']}). Duration: "
-                f"{format_duration(stopped['duration_seconds'])}."
+                f"{format_duration(stopped['timer_elapsed_seconds'])}."
             )
 
         @router.message(Command("undo"))
@@ -371,7 +372,8 @@ class TelegramSupervisor:
             await state.clear()
             await state.set_state(BackfillFlow.minutes)
             await message.answer(
-                "How many minutes ago should the new timer start? Send a whole number."
+                "How many recent minutes should become a completed session? "
+                "Send a whole number."
             )
 
         @router.message(BackfillFlow.minutes)
@@ -393,7 +395,7 @@ class TelegramSupervisor:
             await state.update_data(minutes=minutes)
             await state.set_state(BackfillFlow.category)
             await message.answer(
-                f"Choose the category for the timer starting {minutes} minutes ago.",
+                f"Choose the category for the completed {minutes}-minute session.",
                 reply_markup=category_choice_keyboard("backfill"),
             )
 
@@ -411,7 +413,7 @@ class TelegramSupervisor:
             minutes = int(data.get("minutes", 0))
             category = (callback.data or "").rsplit(":", 1)[-1]
             try:
-                result = await timers.backfill_active(
+                result = await timers.backfill_completed(
                     category,
                     minutes,
                     actor="telegram",
@@ -421,14 +423,22 @@ class TelegramSupervisor:
                 await callback.answer(str(error), show_alert=True)
                 return
             await state.clear()
-            await callback.answer("Timer backfilled.")
+            await callback.answer("Past session inserted.")
             if callback.message:
                 await callback.message.edit_reply_markup(reply_markup=None)
-                started = result["started"]
+                created = result["created"]
                 affected = len(result["trimmed_ids"]) + len(result["deleted_ids"])
+                active = result["active"]
+                active_text = (
+                    f" Active {active['label']} continues at "
+                    f"{format_duration(active['timer_elapsed_seconds'])}."
+                    if active
+                    else " No timer is active."
+                )
                 await callback.message.answer(
-                    f"Started {started['label']} {minutes} minutes ago as "
-                    f"{started['public_id']}. Adjusted {affected} existing session(s).",
+                    f"Created {created['public_id']} ({created['label']}) for the "
+                    f"last {minutes} minutes. Adjusted {affected} existing session(s)."
+                    f"{active_text}",
                     reply_markup=keyboard(),
                 )
 
@@ -452,7 +462,7 @@ class TelegramSupervisor:
                 await message.answer(
                     f"Switched to {result['started']['label']}. Previous: "
                     f"{result['stopped']['public_id']} / "
-                    f"{format_duration(result['stopped']['duration_seconds'])}."
+                    f"{format_duration(result['stopped']['timer_elapsed_seconds'])}."
                 )
             elif result["started"]:
                 await message.answer(
@@ -463,7 +473,7 @@ class TelegramSupervisor:
                 await message.answer(
                     f"Stopped {result['stopped']['public_id']} "
                     f"({result['stopped']['label']}). Duration: "
-                    f"{format_duration(result['stopped']['duration_seconds'])}."
+                    f"{format_duration(result['stopped']['timer_elapsed_seconds'])}."
                 )
 
         return router
@@ -482,13 +492,14 @@ class TelegramSupervisor:
             if (
                 active
                 and reminder_minutes > 0
-                and active["duration_seconds"] >= reminder_minutes * 60
+                and active["timer_elapsed_seconds"] >= reminder_minutes * 60
                 and reminded_session != active["id"]
             ):
                 await bot.send_message(
                     owner_id,
                     f"{active['label']} has been active for "
-                    f"{format_duration(active['duration_seconds'])}. Use /status or /stop.",
+                    f"{format_duration(active['timer_elapsed_seconds'])}. "
+                    "Use /status or /stop.",
                 )
                 reminded_session = active["id"]
             if not active:

@@ -117,7 +117,7 @@ Restore header: `X-Updater-Token`.
 
 - Bot works independently from web session state.
 - Command flow: start/stop by category, quick summary, retype the last completed
-  session with `/retype`, and retroactively start a timer with `/backfill`.
+  session with `/retype`, and insert a completed recent session with `/backfill`.
 - Token priority:
   1. `services.chronos.telegram_api` from Kernel Register
   2. `CHRONOS_TELEGRAM_BOT_TOKEN` from `.env` (local fallback only)

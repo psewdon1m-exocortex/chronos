@@ -29,6 +29,8 @@ def serialize_session(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
         "started_at": row["started_at"].isoformat(),
         "stopped_at": row["stopped_at"].isoformat() if row["stopped_at"] else None,
         "duration_seconds": row["duration_seconds"],
+        "carried_seconds": int(row.get("carried_seconds", 0) or 0),
+        "timer_group_key": row.get("timer_group_key"),
         "note": str(row.get("note", "")),
         "source": str(row.get("source", "web")),
         "deleted_at": row["deleted_at"].isoformat() if row.get("deleted_at") else None,
@@ -289,7 +291,8 @@ class Store:
             rows = await connection.fetch(
                 """
                 select id, public_id, user_id, category, started_at, stopped_at,
-                       duration_seconds, note, source, deleted_at
+                       duration_seconds, carried_seconds, timer_group_key,
+                       note, source, deleted_at
                 from time_sessions
                 where user_id = $1 and deleted_at is null
                 order by started_at, id
@@ -333,8 +336,9 @@ class Store:
                         """
                         insert into time_sessions
                             (public_id, user_id, category, started_at, stopped_at,
-                             duration_seconds, note, source)
-                        values ($1, $2, $3, $4, $5, $6, $7, 'restore')
+                             duration_seconds, carried_seconds, timer_group_key,
+                             note, source)
+                        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'restore')
                         """,
                         item.get("public_id"),
                         owner["id"],
@@ -342,6 +346,8 @@ class Store:
                         started,
                         stopped,
                         item.get("duration_seconds"),
+                        max(0, int(item.get("carried_seconds") or 0)),
+                        item.get("timer_group_key"),
                         str(item.get("note") or "")[:500],
                     )
                 for key, value in settings.items():

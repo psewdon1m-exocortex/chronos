@@ -99,9 +99,13 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
   }, []);
 
   const elapsedSinceSync = Math.max(0, tick - syncedAt.current);
-  const sessionDuration = (session: Session): number =>
+  const intervalDuration = (session: Session): number =>
     session.active
       ? liveSeconds(session.duration_seconds, elapsedSinceSync)
+      : session.duration_seconds;
+  const timerDuration = (session: Session): number =>
+    session.active
+      ? liveSeconds(session.timer_elapsed_seconds, elapsedSinceSync)
       : session.duration_seconds;
 
   const grouped = useMemo(() => {
@@ -198,7 +202,7 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
             <section className="timeline-day" key={day}>
               <header>
                 <h2>{day}</h2>
-                <span>{duration(items.reduce((sum, item) => sum + sessionDuration(item), 0))}</span>
+                <span>{duration(items.reduce((sum, item) => sum + intervalDuration(item), 0))}</span>
               </header>
               <div className="timeline-list">
                 {items.map((session) => (
@@ -215,7 +219,7 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
                       </span>
                     </div>
                     <span className="timeline-source">{session.source.toUpperCase()}</span>
-                    <strong className="timeline-duration">{duration(sessionDuration(session), session.active)}</strong>
+                    <strong className="timeline-duration">{duration(timerDuration(session), session.active)}</strong>
                     <div className="row-actions">
                       <button type="button" onClick={() => setEditor(sessionEditor(session, settings?.timezone))} data-smart-hover>
                         Edit

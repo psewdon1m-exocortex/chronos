@@ -38,6 +38,8 @@ def _effective_duration(row: asyncpg.Record | dict[str, Any], now: datetime) -> 
 
 
 def present_session(row: asyncpg.Record, now: datetime) -> dict[str, Any]:
+    duration_seconds = _effective_duration(row, now)
+    carried_seconds = max(0, int(row.get("carried_seconds", 0) or 0))
     return {
         "id": int(row["id"]),
         "public_id": str(row["public_id"]),
@@ -45,7 +47,8 @@ def present_session(row: asyncpg.Record, now: datetime) -> dict[str, Any]:
         "label": CATEGORY_LABELS[row["category"]],
         "started_at": row["started_at"].isoformat(),
         "stopped_at": row["stopped_at"].isoformat() if row["stopped_at"] else None,
-        "duration_seconds": _effective_duration(row, now),
+        "duration_seconds": duration_seconds,
+        "timer_elapsed_seconds": duration_seconds + carried_seconds,
         "note": row["note"],
         "source": row["source"],
         "active": row["stopped_at"] is None,
@@ -64,7 +67,8 @@ class TimerService:
         return await connection.fetchrow(
             """
             select id, public_id, user_id, category, started_at, stopped_at,
-                   duration_seconds, note, source, updated_at, deleted_at
+                   duration_seconds, carried_seconds, timer_group_key,
+                   note, source, updated_at, deleted_at
             from time_sessions
             where user_id = $1 and stopped_at is null and deleted_at is null
             order by started_at desc, id desc
@@ -374,7 +378,7 @@ class TimerService:
         )
         return present_session(row, current)
 
-    async def backfill_active(
+    async def backfill_completed(
         self,
         category: str,
         minutes: int,
@@ -390,6 +394,7 @@ class TimerService:
         start = current - timedelta(minutes=minutes)
         trimmed: list[str] = []
         deleted: list[str] = []
+        continued: asyncpg.Record | None = None
         async with self.store.pool.acquire() as connection:
             async with connection.transaction():
                 owner = await self.store.owner(connection)
@@ -398,19 +403,94 @@ class TimerService:
                     """
                     select * from time_sessions
                     where user_id = $1 and deleted_at is null
-                      and coalesce(stopped_at, 'infinity'::timestamptz) > $2
+                      and started_at < $3
+                      and coalesce(stopped_at, $3) > $2
                     order by started_at, id
                     for update
                     """,
                     owner["id"],
                     start,
+                    current,
                 )
                 before = [serialize_session(row) for row in overlaps]
                 touched: list[int] = []
+                continuation: dict[str, Any] | None = None
+                active_row = next(
+                    (row for row in overlaps if row["stopped_at"] is None),
+                    None,
+                )
+                active_group_key = (
+                    str(active_row["timer_group_key"] or active_row["public_id"])
+                    if active_row
+                    else None
+                )
+                deducted_from_active = sum(
+                    max(
+                        0,
+                        int(
+                            (
+                                min(row["stopped_at"] or current, current)
+                                - max(row["started_at"], start)
+                            ).total_seconds()
+                        ),
+                    )
+                    for row in overlaps
+                    if active_group_key is not None
+                    and str(row["timer_group_key"] or row["public_id"])
+                    == active_group_key
+                )
                 for existing in overlaps:
                     session_id = int(existing["id"])
                     touched.append(session_id)
-                    if existing["started_at"] < start:
+                    session_start = existing["started_at"]
+                    session_end = existing["stopped_at"]
+                    if session_end is None:
+                        elapsed = max(
+                            0,
+                            int((current - session_start).total_seconds())
+                            + int(existing["carried_seconds"] or 0),
+                        )
+                        continuation = {
+                            "category": existing["category"],
+                            "note": existing["note"],
+                            "source": existing["source"],
+                            "carried_seconds": max(
+                                0,
+                                elapsed - deducted_from_active,
+                            ),
+                            "timer_group_key": active_group_key,
+                        }
+                        if session_start < start:
+                            await connection.execute(
+                                """
+                                update time_sessions
+                                set stopped_at = $2,
+                                    duration_seconds = greatest(
+                                        0,
+                                        extract(epoch from ($2 - started_at))::integer
+                                    ),
+                                    updated_at = now()
+                                where id = $1
+                                """,
+                                session_id,
+                                start,
+                            )
+                            trimmed.append(str(existing["public_id"]))
+                        else:
+                            await connection.execute(
+                                """
+                                update time_sessions
+                                set deleted_at = now(), updated_at = now()
+                                where id = $1
+                                """,
+                                session_id,
+                            )
+                            deleted.append(str(existing["public_id"]))
+                        continue
+
+                    has_left = session_start < start
+                    has_right = session_end > current
+                    if has_left:
                         await connection.execute(
                             """
                             update time_sessions
@@ -426,6 +506,45 @@ class TimerService:
                             start,
                         )
                         trimmed.append(str(existing["public_id"]))
+                        if has_right:
+                            right = await connection.fetchrow(
+                                """
+                                insert into time_sessions
+                                    (user_id, category, started_at, stopped_at,
+                                     duration_seconds, timer_group_key, note, source)
+                                values ($1, $2, $3, $4,
+                                        extract(epoch from (
+                                            $4::timestamptz - $3::timestamptz
+                                        ))::integer,
+                                        $5, $6, $7)
+                                returning *
+                                """,
+                                owner["id"],
+                                existing["category"],
+                                current,
+                                session_end,
+                                existing["timer_group_key"],
+                                existing["note"],
+                                existing["source"],
+                            )
+                            touched.append(int(right["id"]))
+                    elif has_right:
+                        await connection.execute(
+                            """
+                            update time_sessions
+                            set started_at = $2,
+                                duration_seconds = greatest(
+                                    0,
+                                    extract(epoch from (stopped_at - $2))::integer
+                                ),
+                                carried_seconds = 0,
+                                updated_at = now()
+                            where id = $1
+                            """,
+                            session_id,
+                            current,
+                        )
+                        trimmed.append(str(existing["public_id"]))
                     else:
                         await connection.execute(
                             """
@@ -436,19 +555,42 @@ class TimerService:
                             session_id,
                         )
                         deleted.append(str(existing["public_id"]))
-                started = await connection.fetchrow(
+                created = await connection.fetchrow(
                     """
                     insert into time_sessions
-                        (user_id, category, started_at, note, source)
-                    values ($1, $2, $3, '', $4)
+                        (user_id, category, started_at, stopped_at,
+                         duration_seconds, note, source)
+                    values ($1, $2, $3, $4,
+                            extract(epoch from (
+                                $4::timestamptz - $3::timestamptz
+                            ))::integer, '', $5)
                     returning *
                     """,
                     owner["id"],
                     category,
                     start,
+                    current,
                     source,
                 )
-                touched.append(int(started["id"]))
+                touched.append(int(created["id"]))
+                if continuation is not None:
+                    continued = await connection.fetchrow(
+                        """
+                        insert into time_sessions
+                            (user_id, category, started_at, carried_seconds,
+                             timer_group_key, note, source)
+                        values ($1, $2, $3, $4, $5, $6, $7)
+                        returning *
+                        """,
+                        owner["id"],
+                        continuation["category"],
+                        current,
+                        continuation["carried_seconds"],
+                        continuation["timer_group_key"],
+                        continuation["note"],
+                        continuation["source"],
+                    )
+                    touched.append(int(continued["id"]))
                 await self._record_undo(
                     connection,
                     user_id=owner["id"],
@@ -459,13 +601,14 @@ class TimerService:
         await self.store.audit(
             status="success",
             action="timer.backfilled",
-            target=str(started["public_id"]),
+            target=str(created["public_id"]),
             actor=actor,
-            message=f"Timer started {minutes} minutes in the past",
+            message=f"Completed session inserted {minutes} minutes in the past",
             details={"trimmed": trimmed, "deleted": deleted},
         )
         return {
-            "started": present_session(started, current),
+            "created": present_session(created, current),
+            "active": present_session(continued, current) if continued else None,
             "trimmed_ids": trimmed,
             "deleted_ids": deleted,
         }
@@ -613,14 +756,17 @@ class TimerService:
                         """
                         insert into time_sessions
                             (id, public_id, user_id, category, started_at, stopped_at,
-                             duration_seconds, note, source, deleted_at, updated_at)
-                        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+                             duration_seconds, carried_seconds, timer_group_key,
+                             note, source, deleted_at, updated_at)
+                        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
                         on conflict (id) do update
                         set public_id = excluded.public_id,
                             category = excluded.category,
                             started_at = excluded.started_at,
                             stopped_at = excluded.stopped_at,
                             duration_seconds = excluded.duration_seconds,
+                            carried_seconds = excluded.carried_seconds,
+                            timer_group_key = excluded.timer_group_key,
                             note = excluded.note,
                             source = excluded.source,
                             deleted_at = excluded.deleted_at,
@@ -635,6 +781,8 @@ class TimerService:
                         if item.get("stopped_at")
                         else None,
                         item.get("duration_seconds"),
+                        max(0, int(item.get("carried_seconds") or 0)),
+                        item.get("timer_group_key"),
                         item.get("note", ""),
                         item.get("source", "web"),
                         datetime.fromisoformat(item["deleted_at"])

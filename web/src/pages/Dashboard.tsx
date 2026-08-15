@@ -33,7 +33,7 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
 
   useEffect(() => {
     void load();
-    const refresh = window.setInterval(() => void load(), 60_000);
+    const refresh = window.setInterval(() => void load(), 5_000);
     return () => window.clearInterval(refresh);
   }, [load]);
 
@@ -46,7 +46,7 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
 
   const activeElapsed = useMemo(() => {
     if (!data?.active) return 0;
-    return liveSeconds(data.active.duration_seconds, elapsedSinceSync);
+    return liveSeconds(data.active.timer_elapsed_seconds, elapsedSinceSync);
   }, [data, elapsedSinceSync]);
 
   const liveToday = useMemo(() => {
@@ -211,7 +211,7 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
                 <span className="session-state">{session.active ? "LIVE" : session.source.toUpperCase()}</span>
                 <strong>{session.label}</strong>
                 <span>{session.public_id} / {session.note || "No note"}</span>
-                <span>{duration(session.active ? liveSeconds(session.duration_seconds, elapsedSinceSync) : session.duration_seconds)}</span>
+                <span>{duration(session.active ? liveSeconds(session.timer_elapsed_seconds, elapsedSinceSync) : session.duration_seconds)}</span>
                 <time>{localDate(session.started_at, settings)}</time>
               </div>
             ))}
