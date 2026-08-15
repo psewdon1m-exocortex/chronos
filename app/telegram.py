@@ -7,8 +7,18 @@ import logging
 from typing import Any
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
-from aiogram.types import BotCommand, KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import (
+    BotCommand,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
 from .constants import CATEGORIES, CATEGORY_LABELS
 from .runtime import RuntimeState
@@ -17,6 +27,12 @@ from .timer_service import TimerError, TimerService, timezone_for
 
 
 LOGGER = logging.getLogger("chronos.telegram")
+MAX_BACKFILL_MINUTES = 10080
+
+
+class BackfillFlow(StatesGroup):
+    minutes = State()
+    category = State()
 
 
 def format_duration(seconds: int) -> str:
@@ -44,6 +60,17 @@ def keyboard() -> ReplyKeyboardMarkup:
         is_persistent=True,
         input_field_placeholder="Select the current category",
     )
+
+
+def category_choice_keyboard(action: str) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(
+            text=CATEGORY_LABELS[key],
+            callback_data=f"chronos:{action}:{key}",
+        )
+        for key in CATEGORIES
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
 
 
 class TelegramSupervisor:
@@ -122,6 +149,8 @@ class TelegramSupervisor:
                     BotCommand(command="month", description="Show this month's balance"),
                     BotCommand(command="stop", description="Stop the active timer"),
                     BotCommand(command="undo", description="Undo the last timer action"),
+                    BotCommand(command="retype", description="Change the last completed session"),
+                    BotCommand(command="backfill", description="Start a timer in the past"),
                     BotCommand(command="link", description="Link this Telegram account"),
                 ]
             )
@@ -166,6 +195,12 @@ class TelegramSupervisor:
         await message.answer(
             "This is a private Chronos instance. Link your account from the web interface first."
         )
+        return False
+
+    async def _authorized_callback(self, callback: CallbackQuery) -> bool:
+        if await self.store.is_telegram_owner(callback.from_user.id):
+            return True
+        await callback.answer("This is a private Chronos instance.", show_alert=True)
         return False
 
     async def _period_message(self, start: datetime, end: datetime, title: str) -> str:
@@ -272,7 +307,8 @@ class TelegramSupervisor:
                 await message.answer("No timer is active.")
                 return
             await message.answer(
-                f"Stopped {stopped['label']}. Duration: {format_duration(stopped['duration_seconds'])}."
+                f"Stopped {stopped['public_id']} ({stopped['label']}). Duration: "
+                f"{format_duration(stopped['duration_seconds'])}."
             )
 
         @router.message(Command("undo"))
@@ -285,6 +321,116 @@ class TelegramSupervisor:
                 await message.answer(str(error))
                 return
             await message.answer(f"Undone: {result['undone']}.", reply_markup=keyboard())
+
+        @router.message(Command("retype"))
+        async def retype(message: Message, timers: TimerService, state: FSMContext) -> None:
+            if not await self._authorized(message):
+                return
+            await state.clear()
+            latest = await timers.last_completed()
+            if latest is None:
+                await message.answer("There is no completed session to change.")
+                return
+            await message.answer(
+                f"Choose a new category for {latest['public_id']} ({latest['label']}).",
+                reply_markup=category_choice_keyboard(
+                    f"retype:{latest['public_id']}"
+                ),
+            )
+
+        @router.callback_query(F.data.startswith("chronos:retype:"))
+        async def retype_choice(callback: CallbackQuery, timers: TimerService) -> None:
+            if not await self._authorized_callback(callback):
+                return
+            parts = (callback.data or "").split(":")
+            if len(parts) != 4:
+                await callback.answer("This category choice has expired.", show_alert=True)
+                return
+            public_id, category = parts[2], parts[3]
+            try:
+                changed = await timers.retype_last_completed(
+                    category,
+                    actor="telegram",
+                    expected_public_id=public_id,
+                )
+            except (TimerError, ValueError) as error:
+                await callback.answer(str(error), show_alert=True)
+                return
+            await callback.answer("Category changed.")
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+                await callback.message.answer(
+                    f"{changed['public_id']} is now {changed['label']}.",
+                    reply_markup=keyboard(),
+                )
+
+        @router.message(Command("backfill"))
+        async def backfill(message: Message, state: FSMContext) -> None:
+            if not await self._authorized(message):
+                return
+            await state.clear()
+            await state.set_state(BackfillFlow.minutes)
+            await message.answer(
+                "How many minutes ago should the new timer start? Send a whole number."
+            )
+
+        @router.message(BackfillFlow.minutes)
+        async def backfill_minutes(message: Message, state: FSMContext) -> None:
+            if not await self._authorized(message):
+                await state.clear()
+                return
+            raw = (message.text or "").strip()
+            try:
+                minutes = int(raw)
+            except ValueError:
+                await message.answer("Send the number of minutes as a whole number.")
+                return
+            if minutes < 1 or minutes > MAX_BACKFILL_MINUTES:
+                await message.answer(
+                    f"Minutes must be between 1 and {MAX_BACKFILL_MINUTES}."
+                )
+                return
+            await state.update_data(minutes=minutes)
+            await state.set_state(BackfillFlow.category)
+            await message.answer(
+                f"Choose the category for the timer starting {minutes} minutes ago.",
+                reply_markup=category_choice_keyboard("backfill"),
+            )
+
+        @router.callback_query(
+            BackfillFlow.category,
+            F.data.startswith("chronos:backfill:"),
+        )
+        async def backfill_category(
+            callback: CallbackQuery, timers: TimerService, state: FSMContext
+        ) -> None:
+            if not await self._authorized_callback(callback):
+                await state.clear()
+                return
+            data = await state.get_data()
+            minutes = int(data.get("minutes", 0))
+            category = (callback.data or "").rsplit(":", 1)[-1]
+            try:
+                result = await timers.backfill_active(
+                    category,
+                    minutes,
+                    actor="telegram",
+                    source="telegram",
+                )
+            except (TimerError, ValueError) as error:
+                await callback.answer(str(error), show_alert=True)
+                return
+            await state.clear()
+            await callback.answer("Timer backfilled.")
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+                started = result["started"]
+                affected = len(result["trimmed_ids"]) + len(result["deleted_ids"])
+                await callback.message.answer(
+                    f"Started {started['label']} {minutes} minutes ago as "
+                    f"{started['public_id']}. Adjusted {affected} existing session(s).",
+                    reply_markup=keyboard(),
+                )
 
         @router.message(F.text)
         async def category_button(message: Message, timers: TimerService) -> None:
@@ -305,13 +451,18 @@ class TelegramSupervisor:
             if result["started"] and result["stopped"]:
                 await message.answer(
                     f"Switched to {result['started']['label']}. Previous: "
+                    f"{result['stopped']['public_id']} / "
                     f"{format_duration(result['stopped']['duration_seconds'])}."
                 )
             elif result["started"]:
-                await message.answer(f"Started {result['started']['label']}.")
+                await message.answer(
+                    f"Started {result['started']['public_id']} "
+                    f"({result['started']['label']})."
+                )
             else:
                 await message.answer(
-                    f"Stopped {result['stopped']['label']}. Duration: "
+                    f"Stopped {result['stopped']['public_id']} "
+                    f"({result['stopped']['label']}). Duration: "
                     f"{format_duration(result['stopped']['duration_seconds'])}."
                 )
 
@@ -355,4 +506,3 @@ class TelegramSupervisor:
                 await self._period_message(start, now, "Daily summary"),
             )
             summarized_date = now.date()
-

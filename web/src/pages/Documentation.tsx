@@ -68,7 +68,8 @@ const SECTIONS = [
       <>
         <p>Chronos is private. Generate a one-time code in Settings and send <code>/link CODE</code> to the configured bot. After linking, every other Telegram account is rejected.</p>
         <h3>Commands</h3>
-        <pre><code>{`/status  active timer\n/stats   today\n/week    current week\n/month   current month\n/stop    stop active timer\n/undo    undo last timer action`}</code></pre>
+        <pre><code>{`/status    active timer\n/stats     today\n/week      current week\n/month     current month\n/stop      stop active timer\n/undo      undo last timer action\n/retype    change the last completed session category\n/backfill  start a timer a chosen number of minutes ago`}</code></pre>
+        <p>Retyping offers the four fixed category buttons. Backfill asks for whole minutes, then a category; it trims or removes overlapped sessions and starts the selected timer from that point.</p>
         <p>Long-timer reminders and the daily summary follow the timezone and schedule configured in Settings.</p>
       </>
     ),
@@ -124,4 +125,3 @@ export default function Documentation() {
     </section>
   );
 }
-

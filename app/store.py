@@ -23,6 +23,7 @@ def _json_value(value: Any) -> Any:
 def serialize_session(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
+        "public_id": str(row["public_id"]),
         "user_id": int(row["user_id"]),
         "category": str(row["category"]),
         "started_at": row["started_at"].isoformat(),
@@ -287,7 +288,7 @@ class Store:
         async with self.pool.acquire() as connection:
             rows = await connection.fetch(
                 """
-                select id, user_id, category, started_at, stopped_at,
+                select id, public_id, user_id, category, started_at, stopped_at,
                        duration_seconds, note, source, deleted_at
                 from time_sessions
                 where user_id = $1 and deleted_at is null
@@ -331,10 +332,11 @@ class Store:
                     await connection.execute(
                         """
                         insert into time_sessions
-                            (user_id, category, started_at, stopped_at,
+                            (public_id, user_id, category, started_at, stopped_at,
                              duration_seconds, note, source)
-                        values ($1, $2, $3, $4, $5, $6, 'restore')
+                        values ($1, $2, $3, $4, $5, $6, $7, 'restore')
                         """,
+                        item.get("public_id"),
                         owner["id"],
                         item["category"],
                         started,
@@ -373,7 +375,7 @@ class Store:
         async with self.pool.acquire() as connection:
             return await connection.fetch(
                 """
-                select id, category, started_at, stopped_at, duration_seconds,
+                select id, public_id, category, started_at, stopped_at, duration_seconds,
                        note, source
                 from time_sessions
                 where user_id = $1 and deleted_at is null
@@ -381,4 +383,3 @@ class Store:
                 """,
                 owner["id"],
             )
-

@@ -1,35 +1,36 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api";
-import { CATEGORY_LABELS, dateInput, duration } from "../format";
-import type { Analytics as AnalyticsData, Category } from "../types";
+import { addDays, CATEGORY_LABELS, dateInput, duration } from "../format";
+import type { Analytics as AnalyticsData, Category, SettingsValues } from "../types";
 import { EmptyState, LoadingBlock, useNotices } from "../ui";
 
 
 type Preset = "today" | "week" | "month" | "30d" | "custom";
 
 
-function datesFor(preset: Preset): { start: string; end: string } {
+function datesFor(
+  preset: Preset,
+  settings?: Partial<SettingsValues>,
+): { start: string; end: string } {
   const now = new Date();
-  const end = dateInput(now);
+  const end = dateInput(now, settings?.timezone);
   if (preset === "today") return { start: end, end };
   if (preset === "week") {
-    const start = new Date(now);
-    const day = start.getDay() || 7;
-    start.setDate(start.getDate() - day + 1);
-    return { start: dateInput(start), end };
+    const day = new Date(`${end}T00:00:00Z`).getUTCDay() || 7;
+    const weekStartsOn = settings?.week_starts_on ?? 1;
+    const offset = (day - weekStartsOn + 7) % 7;
+    return { start: addDays(end, -offset), end };
   }
   if (preset === "month") {
-    return { start: dateInput(new Date(now.getFullYear(), now.getMonth(), 1)), end };
+    return { start: `${end.slice(0, 7)}-01`, end };
   }
-  const start = new Date(now);
-  start.setDate(start.getDate() - 29);
-  return { start: dateInput(start), end };
+  return { start: addDays(end, -29), end };
 }
 
 
-export default function Analytics() {
-  const initial = datesFor("week");
+export default function Analytics({ settings }: { settings?: SettingsValues }) {
+  const initial = datesFor("week", settings);
   const [preset, setPreset] = useState<Preset>("week");
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
@@ -53,6 +54,13 @@ export default function Analytics() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (preset === "custom") return;
+    const dates = datesFor(preset, settings);
+    setStart(dates.start);
+    setEnd(dates.end);
+  }, [preset, settings?.timezone, settings?.week_starts_on]);
+
   const maxDay = useMemo(
     () => Math.max(1, ...(data?.days.map((day) => day.total_seconds) ?? [1])),
     [data],
@@ -66,7 +74,7 @@ export default function Analytics() {
   const selectPreset = (value: Preset) => {
     setPreset(value);
     if (value !== "custom") {
-      const dates = datesFor(value);
+      const dates = datesFor(value, settings);
       setStart(dates.start);
       setEnd(dates.end);
     }
@@ -187,4 +195,3 @@ export default function Analytics() {
     </div>
   );
 }
-

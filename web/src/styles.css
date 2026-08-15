@@ -767,8 +767,17 @@ pre {
 .timeline-entry.is-active { color: var(--accent); }
 
 .timeline-category {
+  display: grid;
+  gap: 4px;
   color: var(--accent);
   text-transform: uppercase;
+}
+
+.timeline-category small {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
 }
 
 .timeline-copy {
@@ -1380,4 +1389,3 @@ input[type="color"] {
   [data-smart-hover]:hover,
   [data-smart-hover]:focus-visible { transform: none !important; }
 }
-

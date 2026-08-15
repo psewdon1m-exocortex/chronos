@@ -330,6 +330,8 @@ def create_app() -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
@@ -448,6 +450,7 @@ def create_app() -> FastAPI:
             limit=6,
             offset=0,
         )
+        active = await timers.active(now=now)
         return {
             "now": now.isoformat(),
             "profile_name": settings["profile_name"],
@@ -455,7 +458,7 @@ def create_app() -> FastAPI:
             "categories": [
                 {"key": key, "label": CATEGORY_LABELS[key]} for key in CATEGORIES
             ],
-            "active": await timers.active(),
+            "active": active,
             "today": analytics,
             "recent": recent["items"],
             "telegram": {
@@ -561,12 +564,22 @@ def create_app() -> FastAPI:
         output = StringIO(newline="")
         writer = csv.writer(output)
         writer.writerow(
-            ["id", "category", "started_at", "stopped_at", "duration_seconds", "note", "source"]
+            [
+                "id",
+                "public_id",
+                "category",
+                "started_at",
+                "stopped_at",
+                "duration_seconds",
+                "note",
+                "source",
+            ]
         )
         for row in rows:
             writer.writerow(
                 [
                     row["id"],
+                    row["public_id"],
                     row["category"],
                     row["started_at"].isoformat(),
                     row["stopped_at"].isoformat() if row["stopped_at"] else "",

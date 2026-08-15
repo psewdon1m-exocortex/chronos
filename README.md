@@ -23,6 +23,7 @@ Chronos runs in three modes:
 - Session workflow:
   - start and stop
   - manual corrections
+  - stable public IDs such as `t-00000001`
   - delete and restore entries
 - Analytics by day and period, including percentage splits.
 - Full backup and restore flow using JSON archive.
@@ -115,7 +116,8 @@ Restore header: `X-Updater-Token`.
 ## Telegram behavior
 
 - Bot works independently from web session state.
-- Command flow: start/stop by category, quick summary.
+- Command flow: start/stop by category, quick summary, retype the last completed
+  session with `/retype`, and retroactively start a timer with `/backfill`.
 - Token priority:
   1. `services.chronos.telegram_api` from Kernel Register
   2. `CHRONOS_TELEGRAM_BOT_TOKEN` from `.env` (local fallback only)

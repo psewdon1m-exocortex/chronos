@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,6 +32,7 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
         assert csrf
         dashboard = client.get("/api/dashboard")
         assert dashboard.status_code == 200
+        assert dashboard.headers["cache-control"] == "no-store"
         assert [item["key"] for item in dashboard.json()["categories"]] == [
             "recovery",
             "accumulation",
@@ -44,4 +46,4 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
         )
         assert press.status_code == 200
         assert press.json()["started"]["category"] == "execution"
-
+        assert re.fullmatch(r"t-\d{8,}", press.json()["started"]["public_id"])

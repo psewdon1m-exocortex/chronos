@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api";
-import { CATEGORY_DESCRIPTIONS, duration, localDate } from "../format";
+import { CATEGORY_DESCRIPTIONS, duration, liveSeconds, localDate } from "../format";
 import type { Category, DashboardData, Session, SettingsValues } from "../types";
 import { EmptyState, LoadingBlock, useNotices } from "../ui";
 
@@ -15,12 +15,17 @@ interface DashboardProps {
 export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [pending, setPending] = useState<Category | "stop" | "undo" | null>(null);
-  const [tick, setTick] = useState(Date.now());
+  const [tick, setTick] = useState(0);
+  const syncedAt = useRef(0);
   const { notify } = useNotices();
 
   const load = useCallback(async () => {
     try {
-      setData(await api<DashboardData>("/api/dashboard"));
+      const result = await api<DashboardData>("/api/dashboard");
+      const receivedAt = performance.now();
+      syncedAt.current = receivedAt;
+      setTick(receivedAt);
+      setData(result);
     } catch (error) {
       notify("error", error instanceof Error ? error.message : "Dashboard could not be loaded.");
     }
@@ -33,14 +38,34 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
   }, [load]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setTick(Date.now()), 1000);
+    const timer = window.setInterval(() => setTick(performance.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
+  const elapsedSinceSync = Math.max(0, tick - syncedAt.current);
+
   const activeElapsed = useMemo(() => {
     if (!data?.active) return 0;
-    return data.active.duration_seconds + Math.max(0, Math.floor((tick - Date.parse(data.now)) / 1000));
-  }, [data, tick]);
+    return liveSeconds(data.active.duration_seconds, elapsedSinceSync);
+  }, [data, elapsedSinceSync]);
+
+  const liveToday = useMemo(() => {
+    if (!data?.active) return data?.today ?? null;
+    const increment = Math.floor(elapsedSinceSync / 1000);
+    const totalSeconds = data.today.total_seconds + increment;
+    return {
+      ...data.today,
+      total_seconds: totalSeconds,
+      categories: data.today.categories.map((item) => {
+        const seconds = item.seconds + (item.category === data.active?.category ? increment : 0);
+        return {
+          ...item,
+          seconds,
+          percent: totalSeconds ? Math.round((seconds * 10000) / totalSeconds) / 100 : 0,
+        };
+      }),
+    };
+  }, [data, elapsedSinceSync]);
 
   const press = async (category: Category) => {
     setPending(category);
@@ -122,7 +147,7 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
         </div>
         <div className="category-grid" aria-label="Chronos categories">
           {data.categories.map(({ key, label }) => {
-            const metric = data.today.categories.find((item) => item.category === key);
+            const metric = liveToday?.categories.find((item) => item.category === key);
             const active = data.active?.category === key;
             return (
               <button
@@ -151,10 +176,10 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
             <span className="eyebrow">TODAY</span>
             <h2>Time balance</h2>
           </div>
-          <strong className="total-value">{duration(data.today.total_seconds)}</strong>
+          <strong className="total-value">{duration(liveToday?.total_seconds ?? 0)}</strong>
         </div>
         <div className="balance-list">
-          {data.today.categories.map((item) => (
+          {(liveToday?.categories ?? []).map((item) => (
             <div className="balance-row" key={item.category}>
               <div className="balance-meta">
                 <span>{item.label}</span>
@@ -185,8 +210,8 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
               <div className="session-compact-row" key={session.id}>
                 <span className="session-state">{session.active ? "LIVE" : session.source.toUpperCase()}</span>
                 <strong>{session.label}</strong>
-                <span>{session.note || "No note"}</span>
-                <span>{duration(session.active ? activeElapsed : session.duration_seconds)}</span>
+                <span>{session.public_id} / {session.note || "No note"}</span>
+                <span>{duration(session.active ? liveSeconds(session.duration_seconds, elapsedSinceSync) : session.duration_seconds)}</span>
                 <time>{localDate(session.started_at, settings)}</time>
               </div>
             ))}
@@ -198,4 +223,3 @@ export default function Dashboard({ settings, onOpenTimeline }: DashboardProps) 
     </div>
   );
 }
-

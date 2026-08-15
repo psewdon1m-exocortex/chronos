@@ -1,7 +1,15 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, download } from "../api";
-import { CATEGORY_LABELS, duration, inputDateTime, localDate } from "../format";
+import {
+  CATEGORY_LABELS,
+  duration,
+  inputDateTime,
+  liveSeconds,
+  localDate,
+  localDateKey,
+  zonedDateTimeToIso,
+} from "../format";
 import type { Category, Session, SettingsValues } from "../types";
 import {
   ConfirmOverlay,
@@ -26,24 +34,24 @@ interface EditorState {
 }
 
 
-function defaultEditor(): EditorState {
+function defaultEditor(timeZone?: string): EditorState {
   const end = new Date();
   const start = new Date(end.getTime() - 60 * 60 * 1000);
   return {
     category: "execution",
-    startedAt: inputDateTime(start.toISOString()),
-    stoppedAt: inputDateTime(end.toISOString()),
+    startedAt: inputDateTime(start.toISOString(), timeZone),
+    stoppedAt: inputDateTime(end.toISOString(), timeZone),
     note: "",
   };
 }
 
 
-function sessionEditor(session: Session): EditorState {
+function sessionEditor(session: Session, timeZone?: string): EditorState {
   return {
     session,
     category: session.category,
-    startedAt: inputDateTime(session.started_at),
-    stoppedAt: session.stopped_at ? inputDateTime(session.stopped_at) : "",
+    startedAt: inputDateTime(session.started_at, timeZone),
+    stoppedAt: session.stopped_at ? inputDateTime(session.stopped_at, timeZone) : "",
     note: session.note,
   };
 }
@@ -57,6 +65,8 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [deleting, setDeleting] = useState<Session | null>(null);
   const [pending, setPending] = useState(false);
+  const [tick, setTick] = useState(0);
+  const syncedAt = useRef(0);
   const { notify } = useNotices();
 
   const load = useCallback(async () => {
@@ -64,6 +74,9 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
     if (category !== "all") params.set("category", category);
     try {
       const result = await api<{ items: Session[]; total: number }>(`/api/sessions?${params}`);
+      const receivedAt = performance.now();
+      syncedAt.current = receivedAt;
+      setTick(receivedAt);
       setSessions(result.items);
       setTotal(result.total);
     } catch (error) {
@@ -73,17 +86,32 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
 
   useEffect(() => {
     const delay = window.setTimeout(() => void load(), 150);
-    return () => window.clearTimeout(delay);
+    const refresh = window.setInterval(() => void load(), 60_000);
+    return () => {
+      window.clearTimeout(delay);
+      window.clearInterval(refresh);
+    };
   }, [load]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick(performance.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const elapsedSinceSync = Math.max(0, tick - syncedAt.current);
+  const sessionDuration = (session: Session): number =>
+    session.active
+      ? liveSeconds(session.duration_seconds, elapsedSinceSync)
+      : session.duration_seconds;
 
   const grouped = useMemo(() => {
     const result = new Map<string, Session[]>();
     for (const session of sessions ?? []) {
-      const key = new Date(session.started_at).toLocaleDateString();
+      const key = localDateKey(session.started_at, settings?.timezone);
       result.set(key, [...(result.get(key) ?? []), session]);
     }
     return [...result.entries()];
-  }, [sessions]);
+  }, [sessions, settings?.timezone]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -94,8 +122,10 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
     }
     const payload = {
       category: editor.category,
-      started_at: new Date(editor.startedAt).toISOString(),
-      stopped_at: editor.stoppedAt ? new Date(editor.stoppedAt).toISOString() : null,
+      started_at: zonedDateTimeToIso(editor.startedAt, settings?.timezone),
+      stopped_at: editor.stoppedAt
+        ? zonedDateTimeToIso(editor.stoppedAt, settings?.timezone)
+        : null,
       note: editor.note.trim(),
     };
     if (payload.stopped_at && Date.parse(payload.stopped_at) <= Date.parse(payload.started_at)) {
@@ -155,7 +185,7 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
         <button type="button" onClick={() => download("/api/export.csv")} data-smart-hover>
           Export CSV
         </button>
-        <button type="button" onClick={() => setEditor(defaultEditor())} data-smart-hover>
+        <button type="button" onClick={() => setEditor(defaultEditor(settings?.timezone))} data-smart-hover>
           Add session
         </button>
       </div>
@@ -168,12 +198,15 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
             <section className="timeline-day" key={day}>
               <header>
                 <h2>{day}</h2>
-                <span>{duration(items.reduce((sum, item) => sum + item.duration_seconds, 0))}</span>
+                <span>{duration(items.reduce((sum, item) => sum + sessionDuration(item), 0))}</span>
               </header>
               <div className="timeline-list">
                 {items.map((session) => (
                   <article className={`timeline-entry ${session.active ? "is-active" : ""}`} key={session.id}>
-                    <span className="timeline-category">{session.label}</span>
+                    <span className="timeline-category">
+                      <span>{session.label}</span>
+                      <small>{session.public_id}</small>
+                    </span>
                     <div className="timeline-copy">
                       <strong>{session.note || "Untitled session"}</strong>
                       <span>
@@ -182,9 +215,9 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
                       </span>
                     </div>
                     <span className="timeline-source">{session.source.toUpperCase()}</span>
-                    <strong className="timeline-duration">{duration(session.duration_seconds, session.active)}</strong>
+                    <strong className="timeline-duration">{duration(sessionDuration(session), session.active)}</strong>
                     <div className="row-actions">
-                      <button type="button" onClick={() => setEditor(sessionEditor(session))} data-smart-hover>
+                      <button type="button" onClick={() => setEditor(sessionEditor(session, settings?.timezone))} data-smart-hover>
                         Edit
                       </button>
                       <button type="button" onClick={() => setDeleting(session)} data-smart-hover>
@@ -222,6 +255,7 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
                 <span>Start</span>
                 <input
                   type="datetime-local"
+                  step={1}
                   required
                   value={editor.startedAt}
                   onChange={(event) => setEditor({ ...editor, startedAt: event.target.value })}
@@ -231,6 +265,7 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
                 <span>End {editor.session?.active ? "(leave empty to keep active)" : ""}</span>
                 <input
                   type="datetime-local"
+                  step={1}
                   required={!editor.session?.active}
                   value={editor.stoppedAt}
                   onChange={(event) => setEditor({ ...editor, stoppedAt: event.target.value })}
@@ -278,4 +313,3 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
     </section>
   );
 }
-

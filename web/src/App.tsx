@@ -158,7 +158,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         </header>
         {view === "dashboard" && <Dashboard settings={settings} onOpenTimeline={() => navigate("timeline")} />}
         {view === "timeline" && <Timeline settings={settings} />}
-        {view === "analytics" && <Analytics />}
+        {view === "analytics" && <Analytics settings={settings} />}
         {view === "settings" && (
           <Settings
             onSettingsChanged={(value) => {
@@ -211,4 +211,3 @@ export default function App() {
     </NoticeProvider>
   );
 }
-

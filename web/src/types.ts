@@ -9,6 +9,7 @@ export interface CategoryMetric {
 
 export interface Session {
   id: number;
+  public_id: string;
   category: Category;
   label: string;
   started_at: string;
@@ -88,4 +89,3 @@ export interface AuditEvent {
   request_id: string | null;
   created_at: string;
 }
-
