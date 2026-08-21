@@ -7,28 +7,11 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
-  const [available, setAvailable] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const loginRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loginRef.current?.focus();
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const response = await fetch("/api/health", { credentials: "same-origin" });
-        const result = await response.json();
-        if (!cancelled) setAvailable(response.ok && result.status === "available");
-      } catch {
-        if (!cancelled) setAvailable(false);
-      }
-    };
-    void check();
-    const interval = window.setInterval(() => void check(), 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
   }, []);
 
   const submit = async (event: FormEvent) => {
@@ -57,9 +40,9 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
           <h1 aria-label="CHRONOS">
             {"CHRONOS".split("").map((letter, index) => <span key={`${letter}-${index}`}>{letter}</span>)}
           </h1>
-          <div className={`availability ${available === false ? "unavailable" : ""}`}>
+          <div className="availability">
             <span aria-hidden="true" />
-            {available === null ? "CHECKING" : available ? "AVAILABLE" : "UNAVAILABLE"}
+            AVAILABLE
           </div>
         </header>
         <form onSubmit={submit}>
@@ -90,4 +73,3 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
     </main>
   );
 }
-

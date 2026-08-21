@@ -21,7 +21,18 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
     monkeypatch.delenv("KERNEL_URL", raising=False)
     monkeypatch.delenv("KERNEL_SERVICE_TOKEN", raising=False)
     with TestClient(create_app()) as client:
+        robots = client.get("/robots.txt")
+        assert robots.text == "User-agent: *\nDisallow: /\n"
+        assert robots.headers["x-robots-tag"] == "noindex, nofollow, noarchive, nosnippet"
+        assert client.get("/openapi.json").status_code == 404
         assert client.get("/api/health").json()["status"] == "available"
+        assert client.get(
+            "/api/health", headers={"X-Forwarded-For": "203.0.113.10"}
+        ).status_code == 404
+        for probe in ("/.env", "/wp-admin", "/phpmyadmin", "/.git/config"):
+            probe_response = client.get(probe)
+            assert probe_response.status_code == 404
+            assert probe_response.json() == {"error": "Not found"}
         assert client.get("/api/dashboard").status_code == 401
         login = client.post(
             "/api/auth/login",
@@ -33,6 +44,7 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
         dashboard = client.get("/api/dashboard")
         assert dashboard.status_code == 200
         assert dashboard.headers["cache-control"] == "no-store"
+        assert dashboard.headers["x-robots-tag"] == "noindex, nofollow, noarchive, nosnippet"
         assert [item["key"] for item in dashboard.json()["categories"]] == [
             "recovery",
             "accumulation",

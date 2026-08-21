@@ -20,7 +20,8 @@ mkdir -p "$root/$output"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 cp "$root/compose.yaml" "$root/compose.production.yaml" "$root/compose.updater.yaml" \
-  "$root/.env.example" "$root/install.sh" "$root/bootstrap.sh" "$stage/"
+  "$root/.env.example" "$root/install.sh" "$root/bootstrap.sh" \
+  "$root/nginx.security.conf" "$stage/"
 cp -R "$updater_dir" "$stage/updater"
 find "$stage/updater" -type f -name '*.sh' -exec chmod 0755 {} +
 chmod 0755 "$stage/install.sh" "$stage/bootstrap.sh" "$stage/updater/updater-linux-amd64"
@@ -51,4 +52,3 @@ cat > "$root/$output/chronos-release.json" <<EOF
   "release_notes_url": "https://github.com/${repository}/releases/tag/chronos-v${version}"
 }
 EOF
-

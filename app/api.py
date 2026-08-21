@@ -48,6 +48,17 @@ CSRF_COOKIE_NAME = "chronos_csrf"
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+ROBOTS_POLICY = Path(__file__).with_name("robots.txt").read_text(encoding="utf-8")
+PROXY_IDENTITY_HEADERS = (
+    "forwarded",
+    "x-forwarded-for",
+    "x-real-ip",
+    "cf-connecting-ip",
+)
+BLOCKED_PROBE_PATH = re.compile(
+    r"(?:^|/)\.|\.(?:env|ini|log|sql|bak|backup|old|swp|zip|tar|gz)$",
+    re.IGNORECASE,
+)
 
 
 class LoginInput(BaseModel):
@@ -103,6 +114,10 @@ def _request_id() -> str:
 
 def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def _is_proxied_request(request: Request) -> bool:
+    return any(request.headers.get(name) for name in PROXY_IDENTITY_HEADERS)
 
 
 def _check_login_rate(request: Request) -> None:
@@ -314,6 +329,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url=None,
         redoc_url=None,
+        openapi_url=None,
         lifespan=lifespan,
     )
 
@@ -321,13 +337,17 @@ def create_app() -> FastAPI:
     async def request_context(request: Request, call_next):
         request.state.request_id = request.headers.get("X-Request-ID") or _request_id()
         started = time_module.monotonic()
-        try:
-            response = await call_next(request)
-        except Exception:
-            LOGGER.exception("Unhandled request error", extra={"request_id": request.state.request_id})
-            raise
+        if BLOCKED_PROBE_PATH.search(request.url.path):
+            response = JSONResponse(status_code=404, content={"error": "Not found"})
+        else:
+            try:
+                response = await call_next(request)
+            except Exception:
+                LOGGER.exception("Unhandled request error", extra={"request_id": request.state.request_id})
+                raise
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if request.url.path.startswith("/api/"):
@@ -347,8 +367,14 @@ def create_app() -> FastAPI:
     async def updater_error(_: Request, error: UpdaterError):
         return JSONResponse(status_code=error.status, content={"error": str(error)})
 
-    @app.get("/api/health")
+    @app.get("/robots.txt", include_in_schema=False)
+    async def robots_txt():
+        return Response(content=ROBOTS_POLICY, media_type="text/plain")
+
+    @app.get("/api/health", include_in_schema=False)
     async def health(request: Request):
+        if _is_proxied_request(request):
+            raise HTTPException(status_code=404, detail="Not found")
         runtime: RuntimeState = request.app.state.runtime
         telegram: TelegramSupervisor = request.app.state.telegram
         try:
@@ -924,12 +950,14 @@ def create_app() -> FastAPI:
         if web_dir.exists() and requested.is_relative_to(web_dir) and requested.is_file():
             return FileResponse(requested)
         index = web_dir / "index.html"
-        if index.exists():
+        if not path and index.exists():
             return FileResponse(index)
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Chronos web interface has not been built"},
-        )
+        if not path:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Chronos web interface has not been built"},
+            )
+        return JSONResponse(status_code=404, content={"error": "Not found"})
 
     return app
 

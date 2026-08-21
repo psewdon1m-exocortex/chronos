@@ -71,6 +71,12 @@ docker compose --env-file .env -f compose.production.yaml up -d
 
 Public routing and TLS are expected to be handled by Kernel/Nginx layer.
 
+The release bundle contains Chronos's own `nginx.security.conf`. Include it
+inside the public HTTPS `server {}` block (for example,
+`include /opt/exocortex/chronos/nginx.security.conf;`) and run `nginx -t`
+before reload. The policy is route-list independent: new UI tabs require no
+Nginx edits because only `/` serves the SPA shell.
+
 ## Required environment keys
 
 - `KERNEL_URL`

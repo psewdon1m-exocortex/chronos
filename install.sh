@@ -117,6 +117,7 @@ validate_install() {
     echo "Cannot pull the Chronos image. Make the GHCR package public or authenticate Docker to ghcr.io." >&2
     exit 14
   }
+  set_env UPDATER_PUBLIC_HEALTH_URL ""
 }
 
 install_chronos() {
@@ -152,4 +153,3 @@ case "$ACTION" in
   ;;
   *) echo "Usage: chronos-install [install|prepare|status]" >&2; exit 2 ;;
 esac
-
