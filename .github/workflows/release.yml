@@ -106,8 +106,7 @@ jobs:
           docker run -d --name release-smoke-chronos --network chronos-release-test \
             -e CHRONOS_LISTEN_PORT=18280 \
             -e CHRONOS_DATA_DIR=/tmp/chronos-data \
-            -e CHRONOS_ADMIN_USERNAME=release-operator \
-            -e CHRONOS_ADMIN_PASSWORD=release-test-password \
+            -e CHRONOS_ACCESS_KEY=release-test-access-key \
             -e CHRONOS_SESSION_SECRET=release-test-session-secret-32-characters \
             -e DATABASE_URL=postgresql://chronos:release-database-password@chronos-release-db:5432/chronos \
             -e CHRONOS_COOKIE_SECURE=false "$image"
