@@ -36,6 +36,26 @@ async def test_start_switch_stop_and_undo_are_consistent(store) -> None:
     assert active and active["category"] == "execution"
 
 
+async def test_pressing_active_category_restarts_it_immediately(store) -> None:
+    service = TimerService(store)
+    base = datetime(2026, 8, 5, 8, 0, tzinfo=timezone.utc)
+
+    first = await service.press("recovery", actor="test", source="web", now=base)
+    restarted = await service.press(
+        "recovery", actor="test", source="web", now=base + timedelta(hours=1)
+    )
+
+    assert restarted["action"] == "timer.restarted"
+    assert restarted["stopped"]["public_id"] == first["started"]["public_id"]
+    assert restarted["stopped"]["duration_seconds"] == 3600
+    assert restarted["started"]["category"] == "recovery"
+    assert restarted["started"]["public_id"] != first["started"]["public_id"]
+    assert restarted["started"]["timer_elapsed_seconds"] == 0
+
+    active = await service.active(now=base + timedelta(hours=1))
+    assert active and active["public_id"] == restarted["started"]["public_id"]
+
+
 async def test_manual_sessions_reject_overlap(store) -> None:
     service = TimerService(store)
     start = datetime(2026, 8, 5, 10, 0, tzinfo=timezone.utc)
@@ -327,6 +347,9 @@ async def test_analytics_clips_sessions_to_period_boundaries(store) -> None:
     recovery = next(item for item in result["categories"] if item["category"] == "recovery")
     assert recovery["seconds"] == 1800
     assert recovery["percent"] == 100.0
+    assert result["total_seconds"] == 1800
+    assert result["period_seconds"] == 86400
+    assert result["coverage_percent"] == 2.08
 
 
 async def test_analytics_buckets_days_in_the_requested_timezone(store) -> None:

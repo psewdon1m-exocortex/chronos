@@ -4,6 +4,7 @@ import asyncio
 import csv
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, time, timedelta, timezone
+import hashlib
 import hmac
 from io import BytesIO, StringIO
 import json
@@ -29,14 +30,17 @@ from .kernel_register import KernelRegisterError, apply_register, load_snapshot
 from .runtime import RuntimeState
 from .security import (
     create_session_token,
+    decrypt_service_secret,
+    encrypt_service_secret,
     hash_password,
     new_csrf_token,
     new_link_code,
-    validate_new_password,
+    validate_new_access_key,
     verify_password,
     verify_session_token,
 )
 from .store import Store
+from .telemetry import TelemetrySampler
 from .telegram import TelegramSupervisor
 from .timer_service import TimerError, TimerService, timezone_for
 from .updater import UpdaterClient, UpdaterError, check_github_release
@@ -48,6 +52,7 @@ CSRF_COOKIE_NAME = "chronos_csrf"
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+SENSITIVE_ATTEMPTS: dict[str, list[float]] = {}
 ROBOTS_POLICY = Path(__file__).with_name("robots.txt").read_text(encoding="utf-8")
 PROXY_IDENTITY_HEADERS = (
     "forwarded",
@@ -62,8 +67,7 @@ BLOCKED_PROBE_PATH = re.compile(
 
 
 class LoginInput(BaseModel):
-    username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=1024)
+    access_key: str = Field(min_length=1, max_length=1024)
 
 
 class TimerInput(BaseModel):
@@ -85,23 +89,35 @@ class SessionUpdate(BaseModel):
 
 
 class SettingsInput(BaseModel):
-    profile_name: str = Field(min_length=1, max_length=64)
-    timezone: str = Field(min_length=1, max_length=128)
-    week_starts_on: int = Field(ge=1, le=7)
-    time_format: str
-    date_format: str
-    reminder_minutes: int = Field(ge=0, le=10080)
-    daily_summary_enabled: bool
-    daily_summary_time: str
-    theme_dark: str
-    theme_light: str
-    theme_accent: str
-    sidebar_auto_hide: bool
+    profile_name: str | None = Field(default=None, min_length=1, max_length=64)
+    timezone: str | None = Field(default=None, min_length=1, max_length=128)
+    week_starts_on: int | None = Field(default=None, ge=1, le=7)
+    time_format: str | None = None
+    date_format: str | None = None
+    reminder_minutes: int | None = Field(default=None, ge=0, le=10080)
+    daily_summary_enabled: bool | None = None
+    daily_summary_time: str | None = None
+    theme_accent: str | None = None
+    sidebar_auto_hide: bool | None = None
+    navigation_order: list[str] | None = None
+    dashboard_order: list[str] | None = None
+    settings_order: list[str] | None = None
 
 
-class PasswordInput(BaseModel):
-    current_password: str = Field(min_length=1, max_length=1024)
-    new_password: str = Field(min_length=12, max_length=1024)
+class AccessKeyInput(BaseModel):
+    current_access_key: str = Field(min_length=1, max_length=1024)
+    new_access_key: str = Field(min_length=12, max_length=1024)
+    confirm_access_key: str = Field(min_length=12, max_length=1024)
+
+
+class KernelUrlInput(BaseModel):
+    kernel_url: str = Field(min_length=1, max_length=2048)
+
+
+class KernelTokenInput(BaseModel):
+    kernel_url: str = Field(min_length=1, max_length=2048)
+    new_token: str = Field(min_length=24, max_length=4096)
+    confirm_token: str = Field(min_length=24, max_length=4096)
 
 
 class UpdateInput(BaseModel):
@@ -132,6 +148,20 @@ def _check_login_rate(request: Request) -> None:
 
 def _clear_login_rate(request: Request) -> None:
     LOGIN_ATTEMPTS.pop(_client_key(request), None)
+
+
+def _check_sensitive_rate(request: Request, action: str) -> None:
+    key = f"{action}:{_client_key(request)}"
+    now = time_module.monotonic()
+    attempts = [value for value in SENSITIVE_ATTEMPTS.get(key, []) if now - value < 300]
+    if len(attempts) >= 10:
+        raise HTTPException(status_code=429, detail="Too many credential changes. Try again later.")
+    attempts.append(now)
+    SENSITIVE_ATTEMPTS[key] = attempts
+
+
+def _clear_sensitive_rate(request: Request, action: str) -> None:
+    SENSITIVE_ATTEMPTS.pop(f"{action}:{_client_key(request)}", None)
 
 
 async def operator(request: Request) -> dict[str, Any]:
@@ -197,25 +227,74 @@ def _clear_session_cookies(response: Response, config: RuntimeConfig) -> None:
 
 
 def _validate_settings(data: SettingsInput) -> dict[str, Any]:
+    values = data.model_dump(exclude_none=True)
+    if not values:
+        raise HTTPException(status_code=400, detail="No settings were supplied")
     try:
-        if data.timezone != "UTC":
-            ZoneInfo(data.timezone)
+        zone = values.get("timezone")
+        if zone and zone != "UTC":
+            ZoneInfo(zone)
     except ZoneInfoNotFoundError as error:
         raise HTTPException(status_code=400, detail="Unknown timezone") from error
-    if data.time_format not in {"12h", "24h"}:
+    if "time_format" in values and values["time_format"] not in {"12h", "24h"}:
         raise HTTPException(status_code=400, detail="Unsupported time format")
-    if data.date_format not in {"DD.MM.YYYY", "YYYY-MM-DD", "MM/DD/YYYY"}:
+    if "date_format" in values and values["date_format"] not in {"DD.MM.YYYY", "YYYY-MM-DD", "MM/DD/YYYY"}:
         raise HTTPException(status_code=400, detail="Unsupported date format")
-    if not TIME_PATTERN.fullmatch(data.daily_summary_time):
+    if "daily_summary_time" in values and not TIME_PATTERN.fullmatch(values["daily_summary_time"]):
         raise HTTPException(status_code=400, detail="Daily summary time must use HH:MM")
-    for name, value in {
-        "theme_dark": data.theme_dark,
-        "theme_light": data.theme_light,
-        "theme_accent": data.theme_accent,
-    }.items():
-        if not COLOR_PATTERN.fullmatch(value):
-            raise HTTPException(status_code=400, detail=f"Invalid {name} color")
-    return data.model_dump()
+    if "theme_accent" in values and not COLOR_PATTERN.fullmatch(values["theme_accent"]):
+        raise HTTPException(status_code=400, detail="Invalid accent color")
+    orders = {
+        "navigation_order": {"dashboard", "timeline", "analytics", "settings"},
+        "dashboard_order": {"cpu", "ram", "disk", "uptime", "current", "today", "recent"},
+        "settings_order": {
+            "appearance", "security", "backup", "updates", "logs",
+            "personalization", "telegram",
+        },
+    }
+    for name, expected in orders.items():
+        if name in values and (len(values[name]) != len(expected) or set(values[name]) != expected):
+            raise HTTPException(status_code=400, detail=f"Invalid {name}")
+    return values
+
+
+def _normalize_kernel_url(value: str) -> str:
+    candidate = value.strip().rstrip("/")
+    try:
+        parsed = urlparse(candidate)
+        port = parsed.port
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Kernel URL is invalid") from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise HTTPException(status_code=400, detail="Kernel URL must be an HTTPS origin")
+    return candidate
+
+
+async def _validated_kernel_config(
+    runtime: RuntimeState, *, kernel_url: str, kernel_token: str
+) -> RuntimeConfig:
+    candidate = runtime.config.with_kernel_credentials(
+        kernel_url=kernel_url, kernel_service_token=kernel_token
+    )
+    try:
+        snapshot = await asyncio.to_thread(
+            load_snapshot, candidate, use_cache=False, write_cache=False
+        )
+        return apply_register(candidate, snapshot)
+    except KernelRegisterError as error:
+        raise HTTPException(
+            status_code=400,
+            detail="Kernel rejected the candidate connection or returned an invalid Register snapshot",
+        ) from error
 
 
 def _backup_json(value: dict[str, Any]) -> bytes:
@@ -223,18 +302,30 @@ def _backup_json(value: dict[str, Any]) -> bytes:
 
 
 def _backup_zip(value: dict[str, Any], version: str) -> bytes:
+    payload = _backup_json(value)
+    payload_name = "chronos-backup.json"
     output = BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("chronos-backup.json", _backup_json(value))
+        archive.writestr(payload_name, payload)
         archive.writestr(
             "manifest.json",
             json.dumps(
                 {
                     "schema": "exocortex.chronos.backup-manifest.v1",
+                    "format": "logical-backup",
+                    "schema_version": 1,
                     "service": "chronos",
-                    "version": version,
+                    "source_version": version,
                     "created_at": value["created_at"],
-                    "entries": ["chronos-backup.json"],
+                    "scope": "complete",
+                    "restore_mode": "replace",
+                    "files": {
+                        payload_name: {
+                            "sha256": hashlib.sha256(payload).hexdigest(),
+                            "uncompressed_bytes": len(payload),
+                            "records": len(value.get("sessions", [])),
+                        }
+                    },
                 },
                 indent=2,
             )
@@ -296,7 +387,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         admin_username=config.admin_username,
         admin_password=config.admin_password,
         default_timezone=config.default_timezone,
+        kernel_url_seed=config.kernel_url,
+        kernel_token_ciphertext_seed=encrypt_service_secret(
+            config.kernel_service_token, config.session_secret
+        ),
     )
+    stored_kernel = await store.kernel_credentials()
+    try:
+        stored_kernel_token = decrypt_service_secret(
+            str(stored_kernel["kernel_token_ciphertext"]), config.session_secret
+        )
+    except ValueError as error:
+        raise RuntimeError(
+            "Stored Kernel credential cannot be opened with CHRONOS_SESSION_SECRET"
+        ) from error
+    config = config.with_kernel_credentials(
+        kernel_url=str(stored_kernel["kernel_url"]),
+        kernel_service_token=stored_kernel_token,
+    )
+    validate_runtime_config(config)
     runtime = RuntimeState(config)
     timers = TimerService(store)
     telegram = TelegramSupervisor(runtime, store, timers)
@@ -305,6 +414,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.runtime = runtime
     app.state.timers = timers
     app.state.telegram = telegram
+    app.state.telemetry = TelemetrySampler(config.data_dir)
     app.state.updater = UpdaterClient(
         config.updater_socket_path, config.updater_control_token, config.updater_head_id
     )
@@ -395,11 +505,15 @@ def create_app() -> FastAPI:
     @app.get("/api/public/theme")
     async def public_theme(request: Request):
         settings = await request.app.state.store.settings()
-        return {
-            "dark": settings["theme_dark"],
-            "light": settings["theme_light"],
-            "accent": settings["theme_accent"],
-        }
+        return {"accent": settings["theme_accent"]}
+
+    @app.get("/api/public/reachability")
+    async def public_reachability(request: Request):
+        try:
+            await request.app.state.pool.fetchval("select 1")
+        except Exception:
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
+        return {"status": "available"}
 
     @app.get("/api/auth/status")
     async def auth_status(request: Request):
@@ -408,7 +522,7 @@ def create_app() -> FastAPI:
         except HTTPException:
             return {"authenticated": False}
         security = await request.app.state.store.security()
-        return {"authenticated": True, "username": security["username"]}
+        return {"authenticated": True}
 
     @app.post("/api/auth/login")
     async def login(request: Request, body: LoginInput):
@@ -416,25 +530,23 @@ def create_app() -> FastAPI:
         store: Store = request.app.state.store
         runtime: RuntimeState = request.app.state.runtime
         security = await store.security()
-        valid = hmac.compare_digest(body.username, str(security["username"])) and verify_password(
-            body.password, str(security["password_hash"])
-        )
+        valid = verify_password(body.access_key, str(security["password_hash"]))
         if not valid:
             await store.audit(
                 status="denied",
                 action="auth.login",
-                target=body.username,
+                target="operator",
                 actor="anonymous",
                 message="Invalid operator credentials",
                 request_id=request.state.request_id,
             )
-            raise HTTPException(status_code=401, detail="Invalid login or password")
+            raise HTTPException(status_code=401, detail="Invalid Access Key")
         _clear_login_rate(request)
         csrf = new_csrf_token()
         token = create_session_token(
             runtime.config.session_secret, int(security["session_generation"]), csrf
         )
-        response = JSONResponse({"authenticated": True, "username": security["username"]})
+        response = JSONResponse({"authenticated": True})
         _set_session_cookies(response, runtime.config, token, csrf)
         await store.audit(
             status="success",
@@ -467,7 +579,8 @@ def create_app() -> FastAPI:
         zone = timezone_for(str(settings["timezone"]))
         now = datetime.now(zone)
         start = datetime.combine(now.date(), time.min, tzinfo=zone)
-        analytics = await timers.analytics(start, now)
+        end = datetime.combine(now.date() + timedelta(days=1), time.min, tzinfo=zone)
+        analytics = await timers.analytics(start, end, now=now)
         recent = await timers.history(
             start=start,
             end=now + timedelta(seconds=1),
@@ -491,6 +604,7 @@ def create_app() -> FastAPI:
                 **request.app.state.telegram.status,
                 "linked": bool(await store.telegram_owner_id()),
             },
+            "telemetry": request.app.state.telemetry.sample(),
         }
 
     @app.post("/api/timer/press")
@@ -624,6 +738,7 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     async def get_settings(request: Request, _: dict[str, Any] = Depends(operator)):
         runtime: RuntimeState = request.app.state.runtime
+        stored_kernel = await request.app.state.store.kernel_credentials()
         return {
             "values": await request.app.state.store.settings(),
             "runtime": {
@@ -631,6 +746,9 @@ def create_app() -> FastAPI:
                 "public_url": runtime.config.public_url,
                 "repository_url": runtime.config.repository_url,
                 "register_revision": runtime.config.register_revision or None,
+                "kernel_url": runtime.config.kernel_url or None,
+                "kernel_reachable": bool(runtime.config.register_revision),
+                "kernel_configured": bool(stored_kernel["kernel_token_ciphertext"]),
             },
             "telegram": {
                 **request.app.state.telegram.status,
@@ -639,18 +757,21 @@ def create_app() -> FastAPI:
         }
 
     @app.put("/api/settings")
+    @app.patch("/api/settings")
     async def save_settings(
         request: Request,
         body: SettingsInput,
         _: dict[str, Any] = Depends(mutation_operator),
     ):
-        values = await request.app.state.store.update_settings(_validate_settings(body))
+        changed = _validate_settings(body)
+        values = await request.app.state.store.update_settings(changed)
         await request.app.state.store.audit(
             status="success",
             action="settings.updated",
             target="operator",
             actor="operator",
-            message="Chronos personalization updated",
+            message="Chronos setting updated",
+            details={"keys": sorted(changed)},
             request_id=request.state.request_id,
         )
         return {"values": values}
@@ -660,11 +781,7 @@ def create_app() -> FastAPI:
         request: Request, _: dict[str, Any] = Depends(mutation_operator)
     ):
         values = await request.app.state.store.update_settings(
-            {
-                "theme_dark": DEFAULT_SETTINGS["theme_dark"],
-                "theme_light": DEFAULT_SETTINGS["theme_light"],
-                "theme_accent": DEFAULT_SETTINGS["theme_accent"],
-            }
+            {"theme_accent": DEFAULT_SETTINGS["theme_accent"]}
         )
         await request.app.state.store.audit(
             status="success",
@@ -675,27 +792,30 @@ def create_app() -> FastAPI:
         )
         return {"values": values}
 
-    @app.post("/api/security/password")
-    async def change_password(
+    @app.post("/api/security/access-key")
+    async def change_access_key(
         request: Request,
-        body: PasswordInput,
+        body: AccessKeyInput,
         _: dict[str, Any] = Depends(mutation_operator),
     ):
+        _check_sensitive_rate(request, "access-key")
         store: Store = request.app.state.store
         security = await store.security()
-        if not verify_password(body.current_password, str(security["password_hash"])):
+        if not verify_password(body.current_access_key, str(security["password_hash"])):
             await store.audit(
                 status="denied",
-                action="security.password_change",
+                action="security.access_key_change",
                 actor="operator",
-                message="Current password verification failed",
+                message="Current Access Key verification failed",
             )
-            raise HTTPException(status_code=400, detail="Current password is incorrect")
+            raise HTTPException(status_code=400, detail="Current Access Key is incorrect")
+        if not hmac.compare_digest(body.new_access_key, body.confirm_access_key):
+            raise HTTPException(status_code=400, detail="New Access Key entries do not match")
         try:
-            validate_new_password(body.new_password)
+            validate_new_access_key(body.new_access_key)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        generation = await store.update_password(hash_password(body.new_password))
+        generation = await store.update_password(hash_password(body.new_access_key))
         csrf = new_csrf_token()
         token = create_session_token(
             request.app.state.runtime.config.session_secret, generation, csrf
@@ -704,12 +824,107 @@ def create_app() -> FastAPI:
         _set_session_cookies(response, request.app.state.runtime.config, token, csrf)
         await store.audit(
             status="success",
-            action="security.password_change",
+            action="security.access_key_change",
             target="operator",
             actor="operator",
-            message="Operator password changed",
+            message="Operator Access Key changed",
         )
+        _clear_sensitive_rate(request, "access-key")
         return response
+
+    @app.put("/api/security/kernel-url")
+    async def change_kernel_url(
+        request: Request,
+        body: KernelUrlInput,
+        _: dict[str, Any] = Depends(mutation_operator),
+    ):
+        _check_sensitive_rate(request, "kernel-url")
+        store: Store = request.app.state.store
+        runtime: RuntimeState = request.app.state.runtime
+        kernel_url = _normalize_kernel_url(body.kernel_url)
+        if not runtime.config.kernel_service_token:
+            raise HTTPException(
+                status_code=409,
+                detail="Rotate the Kernel token to validate and activate this URL",
+            )
+        try:
+            updated = await _validated_kernel_config(
+                runtime,
+                kernel_url=kernel_url,
+                kernel_token=runtime.config.kernel_service_token,
+            )
+        except HTTPException:
+            await store.audit(
+                status="error",
+                action="security.kernel_url_change",
+                target=kernel_url,
+                actor="operator",
+                message="Candidate Kernel URL validation failed",
+                request_id=request.state.request_id,
+            )
+            raise
+        await store.update_kernel_credentials(kernel_url=kernel_url)
+        await runtime.replace(updated)
+        await store.audit(
+            status="success",
+            action="security.kernel_url_change",
+            target=kernel_url,
+            actor="operator",
+            message="Kernel URL validated and activated",
+            request_id=request.state.request_id,
+        )
+        _clear_sensitive_rate(request, "kernel-url")
+        return {"kernel_url": updated.kernel_url, "kernel_reachable": True}
+
+    @app.post("/api/security/kernel-token")
+    async def rotate_kernel_token(
+        request: Request,
+        body: KernelTokenInput,
+        _: dict[str, Any] = Depends(mutation_operator),
+    ):
+        _check_sensitive_rate(request, "kernel-token")
+        store: Store = request.app.state.store
+        runtime: RuntimeState = request.app.state.runtime
+        kernel_url = _normalize_kernel_url(body.kernel_url)
+        if not hmac.compare_digest(body.new_token, body.confirm_token):
+            await store.audit(
+                status="denied",
+                action="security.kernel_token_rotation",
+                target=kernel_url,
+                actor="operator",
+                message="Kernel token confirmation did not match",
+                request_id=request.state.request_id,
+            )
+            raise HTTPException(status_code=400, detail="Kernel token entries do not match")
+        try:
+            updated = await _validated_kernel_config(
+                runtime, kernel_url=kernel_url, kernel_token=body.new_token
+            )
+        except HTTPException:
+            await store.audit(
+                status="error",
+                action="security.kernel_token_rotation",
+                target=kernel_url,
+                actor="operator",
+                message="Replacement Kernel token validation failed",
+                request_id=request.state.request_id,
+            )
+            raise
+        ciphertext = encrypt_service_secret(body.new_token, runtime.config.session_secret)
+        await store.update_kernel_credentials(
+            kernel_url=kernel_url, kernel_token_ciphertext=ciphertext
+        )
+        await runtime.replace(updated)
+        await store.audit(
+            status="success",
+            action="security.kernel_token_rotation",
+            target=kernel_url,
+            actor="operator",
+            message="Kernel token validated and rotated",
+            request_id=request.state.request_id,
+        )
+        _clear_sensitive_rate(request, "kernel-token")
+        return {"changed": True, "kernel_url": updated.kernel_url, "kernel_reachable": True}
 
     @app.post("/api/telegram/link-code")
     async def telegram_link_code(
@@ -718,7 +933,7 @@ def create_app() -> FastAPI:
         if await request.app.state.store.telegram_owner_id():
             raise HTTPException(status_code=409, detail="Telegram is already linked")
         code = new_link_code()
-        await request.app.state.store.create_link_code(code)
+        expires_at = await request.app.state.store.create_link_code(code)
         await request.app.state.store.audit(
             status="info",
             action="telegram.link_code_created",
@@ -726,7 +941,7 @@ def create_app() -> FastAPI:
             actor="operator",
             message="One-time Telegram link code created",
         )
-        return {"code": code, "expires_in_seconds": 600}
+        return {"code": code, "expires_at": expires_at.isoformat(), "expires_in_seconds": 600}
 
     @app.delete("/api/telegram/link")
     async def telegram_unlink(
@@ -768,16 +983,47 @@ def create_app() -> FastAPI:
             if body.startswith(b"PK"):
                 with zipfile.ZipFile(BytesIO(body)) as archive:
                     names = archive.namelist()
+                    if len(names) > 16 or len(names) != len(set(names)):
+                        raise ValueError("Archive member list is invalid")
                     if "chronos-backup.json" not in names:
                         raise ValueError("Archive does not contain chronos-backup.json")
                     if any(name.startswith("/") or ".." in Path(name).parts for name in names):
                         raise ValueError("Archive contains an unsafe path")
+                    allowed = {"chronos-backup.json", "manifest.json", "README.txt"}
+                    if any(name not in allowed for name in names):
+                        raise ValueError("Archive contains an unknown member")
+                    total_size = sum(item.file_size for item in archive.infolist())
+                    if total_size > 128 * 1024 * 1024:
+                        raise ValueError("Archive expands beyond 128 MB")
+                    if any(item.file_size > 64 * 1024 * 1024 for item in archive.infolist()):
+                        raise ValueError("Archive member exceeds 64 MB")
                     raw = archive.read("chronos-backup.json")
+                    if "manifest.json" in names:
+                        manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                        entry = manifest.get("files", {}).get("chronos-backup.json", {})
+                        if entry.get("sha256") != hashlib.sha256(raw).hexdigest():
+                            raise ValueError("Backup checksum does not match the manifest")
             else:
                 raw = body
             return json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as error:
             raise HTTPException(status_code=400, detail=f"Invalid Chronos backup: {error}") from error
+
+    @app.post("/api/backup/inspect")
+    async def inspect_backup(
+        file: UploadFile = File(...),
+        _: dict[str, Any] = Depends(mutation_operator),
+    ):
+        backup = await parse_backup_upload(file)
+        sessions = backup.get("sessions")
+        if backup.get("schema") != "exocortex.chronos.backup.v1" or not isinstance(sessions, list):
+            raise HTTPException(status_code=400, detail="Unsupported or incomplete Chronos backup")
+        return {
+            "schema": backup["schema"],
+            "created_at": backup.get("created_at"),
+            "session_count": len(sessions),
+            "restore_mode": "replace",
+        }
 
     @app.post("/api/backup/restore")
     async def restore_backup(
@@ -824,9 +1070,13 @@ def create_app() -> FastAPI:
 
     @app.get("/api/logs")
     async def logs(
-        request: Request, limit: int = 200, _: dict[str, Any] = Depends(operator)
+        request: Request,
+        limit: int = 200,
+        after_id: int | None = None,
+        _: dict[str, Any] = Depends(operator),
     ):
-        return {"events": await request.app.state.store.audit_events(limit)}
+        events = await request.app.state.store.audit_events(min(limit, 1000), after_id=after_id)
+        return {"events": events, "cursor": max((event["id"] for event in events), default=after_id or 0)}
 
     @app.get("/api/logs/download")
     async def download_logs(request: Request, _: dict[str, Any] = Depends(operator)):
@@ -861,7 +1111,10 @@ def create_app() -> FastAPI:
         return Response(
             output.getvalue(),
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store, private",
+            },
         )
 
     @app.get("/api/updates/status")
@@ -901,10 +1154,11 @@ def create_app() -> FastAPI:
         _: dict[str, Any] = Depends(mutation_operator),
     ):
         backup = await request.app.state.store.logical_backup()
+        backup_data = _backup_zip(backup, request.app.state.runtime.config.version)
         result = await request.app.state.updater.create_update(
             version=body.version,
-            backup_name=f"chronos-backup-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.json",
-            backup_data=_backup_json(backup),
+            backup_name=f"chronos-backup-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.zip",
+            backup_data=backup_data,
         )
         await request.app.state.store.audit(
             status="success",

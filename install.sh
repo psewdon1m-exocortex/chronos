@@ -98,14 +98,12 @@ validate_install() {
     }
   done
   docker compose version >/dev/null 2>&1 || { echo "Docker Compose v2 is required." >&2; exit 3; }
-  username=$(get_env CHRONOS_ADMIN_USERNAME)
-  password=$(get_env CHRONOS_ADMIN_PASSWORD)
+  access_key=$(get_env CHRONOS_ACCESS_KEY)
   kernel_url=$(get_env KERNEL_URL)
   kernel_token=$(get_env KERNEL_SERVICE_TOKEN)
   image=$(get_env CHRONOS_IMAGE)
-  case "$username" in ""|CHANGE_ME|operator) echo "Set CHRONOS_ADMIN_USERNAME in .env." >&2; exit 2 ;; esac
-  case "$password" in ""|CHANGE_ME|change-*) echo "Set CHRONOS_ADMIN_PASSWORD in .env." >&2; exit 2 ;; esac
-  [ "${#password}" -ge 12 ] || { echo "CHRONOS_ADMIN_PASSWORD must contain at least 12 characters." >&2; exit 2; }
+  case "$access_key" in ""|CHANGE_ME|change-*) echo "Set CHRONOS_ACCESS_KEY in .env." >&2; exit 2 ;; esac
+  [ "${#access_key}" -ge 12 ] || { echo "CHRONOS_ACCESS_KEY must contain at least 12 characters." >&2; exit 2; }
   case "$kernel_url" in https://*.*) ;; *) echo "KERNEL_URL must be the public HTTPS Kernel URL." >&2; exit 2 ;; esac
   case "$kernel_url" in *CHANGE_ME*|*.example.com*) echo "Replace the example KERNEL_URL." >&2; exit 2 ;; esac
   [ "${#kernel_token}" -ge 24 ] || { echo "Copy KERNEL_SERVICE_TOKEN from Kernel into .env." >&2; exit 2; }

@@ -26,10 +26,27 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
     "reminder_minutes": 180,
     "daily_summary_enabled": False,
     "daily_summary_time": "21:00",
-    "theme_dark": "#000000",
-    "theme_light": "#ffffff",
     "theme_accent": "#00a8ff",
     "sidebar_auto_hide": True,
+    "navigation_order": ["dashboard", "timeline", "analytics", "settings"],
+    "dashboard_order": [
+        "cpu",
+        "ram",
+        "disk",
+        "uptime",
+        "current",
+        "today",
+        "recent",
+    ],
+    "settings_order": [
+        "appearance",
+        "security",
+        "backup",
+        "updates",
+        "logs",
+        "personalization",
+        "telegram",
+    ],
 }
 
 
@@ -38,4 +55,3 @@ def normalize_category(value: str) -> str:
     if category not in CATEGORIES:
         raise ValueError(f"Unknown category: {value}")
     return category
-

@@ -9,6 +9,8 @@ import re
 import time
 from typing import Any
 
+from cryptography.fernet import Fernet, InvalidToken
+
 
 SESSION_TTL_SECONDS = 12 * 60 * 60
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
@@ -121,9 +123,28 @@ def new_link_code() -> str:
     return "".join(alphabet[value % len(alphabet)] for value in entropy)
 
 
-def validate_new_password(value: str) -> None:
+def validate_new_access_key(value: str) -> None:
     if len(value) < 12:
-        raise ValueError("Password must contain at least 12 characters")
+        raise ValueError("Access Key must contain at least 12 characters")
     if value.lower() in {"change_me", "password", "chronos", "administrator"}:
-        raise ValueError("Password is too predictable")
+        raise ValueError("Access Key is too predictable")
 
+
+def _service_secret_cipher(session_secret: str) -> Fernet:
+    key = hashlib.sha256(f"chronos/service-secret/v1/{session_secret}".encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
+def encrypt_service_secret(value: str, session_secret: str) -> str:
+    if not value:
+        return ""
+    return _service_secret_cipher(session_secret).encrypt(value.encode()).decode("ascii")
+
+
+def decrypt_service_secret(value: str, session_secret: str) -> str:
+    if not value:
+        return ""
+    try:
+        return _service_secret_cipher(session_secret).decrypt(value.encode("ascii")).decode()
+    except (InvalidToken, UnicodeDecodeError, ValueError) as error:
+        raise ValueError("Stored service credential cannot be decrypted") from error

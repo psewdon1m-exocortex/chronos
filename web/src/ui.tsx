@@ -1,11 +1,14 @@
 import {
+  type CSSProperties,
   createContext,
+  type DragEvent,
   type FormEvent,
   type PropsWithChildren,
   type ReactNode,
   useCallback,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -96,27 +99,158 @@ export function useSmartHover(): void {
 }
 
 
+export function ChronosMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <img
+      className={`chronos-mark ${compact ? "is-compact" : ""}`}
+      src="/chronos-mark.png"
+      alt="Chronos mark"
+    />
+  );
+}
+
+
+interface UniversalCardProps extends PropsWithChildren {
+  ordinal: number;
+  title?: string;
+  span?: "1x" | "2x" | "4x";
+  className?: string;
+  reorderLabel?: string;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  onDragOver?: (event: DragEvent<HTMLElement>) => void;
+  onDrop?: (event: DragEvent<HTMLElement>) => void;
+  onMove?: (direction: -1 | 1) => void;
+  style?: CSSProperties;
+}
+
+
+export function UniversalCard({
+  ordinal,
+  title,
+  span = "4x",
+  className = "",
+  reorderLabel,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onMove,
+  style,
+  children,
+}: UniversalCardProps) {
+  const handle = reorderLabel ? (
+    <button
+      type="button"
+      className="drag-handle"
+      draggable
+      aria-label={`Reorder ${reorderLabel}. Use Alt+Arrow keys to move.`}
+      title={`Reorder ${reorderLabel}`}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onKeyDown={(event) => {
+        if (!event.altKey || !onMove) return;
+        if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          onMove(-1);
+        } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+          event.preventDefault();
+          onMove(1);
+        }
+      }}
+    >
+      <span /><span /><span /><span />
+    </button>
+  ) : null;
+  return (
+    <article
+      className={`universal-card card-${span} ${title ? "has-title" : ""} ${className}`}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      style={style}
+      aria-label={title || reorderLabel}
+      data-smart-hover={reorderLabel ? "" : undefined}
+    >
+      {title ? (
+        <header className="universal-card-header">
+          <span className="card-ordinal">{String(ordinal).padStart(2, "0")}</span>
+          <h2>{title}</h2>
+          {handle}
+        </header>
+      ) : (
+        <>
+          <span className="card-ordinal card-ordinal-floating">{String(ordinal).padStart(2, "0")}</span>
+          {handle}
+        </>
+      )}
+      <div className="universal-card-body">{children}</div>
+    </article>
+  );
+}
+
+
+export function CardPlaceholder({ span = "4x" }: { span?: "1x" | "2x" | "4x" }) {
+  return <div className={`card-placeholder card-${span}`} aria-hidden="true" />;
+}
+
+
+export function CollectionCommandBar({ children, label }: PropsWithChildren<{ label: string }>) {
+  return <div className="collection-command-bar" role="toolbar" aria-label={label}>{children}</div>;
+}
+
+
+export function StatusSquare({ state }: { state: "success" | "danger" | "neutral" }) {
+  return <span className={`status-square status-square-${state}`} aria-hidden="true" />;
+}
+
+
 interface OverlayProps {
   title: string;
   children: ReactNode;
   onClose: () => void;
   className?: string;
+  dismissible?: boolean;
 }
 
 
-export function Overlay({ title, children, onClose, className = "" }: OverlayProps) {
+export function Overlay({ title, children, onClose, className = "", dismissible = true }: OverlayProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const invoker = useRef<HTMLElement | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
 
   useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+    invoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && dismissible) onClose();
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+      )];
+      if (!focusable.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", close);
-    dialogRef.current?.focus();
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
+    window.addEventListener("keydown", keyboard);
+    const first = dialogRef.current?.querySelector<HTMLElement>("input, select, textarea, button");
+    (first ?? dialogRef.current)?.focus();
+    return () => {
+      window.removeEventListener("keydown", keyboard);
+      invoker.current?.focus();
+    };
+  }, [dismissible, onClose]);
 
   const move = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!drag.current || !dialogRef.current) return;
@@ -137,13 +271,13 @@ export function Overlay({ title, children, onClose, className = "" }: OverlayPro
   };
 
   return (
-    <div className="overlay-backdrop" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="overlay-backdrop" onPointerDown={(event) => event.target === event.currentTarget && dismissible && onClose()}>
       <div
         ref={dialogRef}
         className={`overlay-dialog ${className}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="overlay-title"
+        aria-labelledby={titleId}
         tabIndex={-1}
         style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
       >
@@ -160,11 +294,12 @@ export function Overlay({ title, children, onClose, className = "" }: OverlayPro
             event.currentTarget.releasePointerCapture(event.pointerId);
           }}
         >
-          <h2 id="overlay-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <button
             type="button"
             className="icon-button"
             onClick={onClose}
+            disabled={!dismissible}
             aria-label="Close dialog"
             title="Close dialog"
             data-smart-hover
@@ -199,7 +334,7 @@ export function ConfirmOverlay({
 }: ConfirmProps) {
   const [pending, setPending] = useState(false);
   return (
-    <Overlay title={title} onClose={pending ? () => undefined : onClose} className="confirm-dialog">
+    <Overlay title={title} onClose={onClose} className="confirm-dialog" dismissible={!pending}>
       <div className="confirm-copy">{description}</div>
       <div className="form-actions">
         <button type="button" onClick={onClose} disabled={pending} data-smart-hover>
@@ -299,4 +434,3 @@ export function useSubmit(
   };
   return { pending, submit };
 }
-

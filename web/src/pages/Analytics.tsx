@@ -3,17 +3,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { addDays, CATEGORY_LABELS, dateInput, duration } from "../format";
 import type { Analytics as AnalyticsData, Category, SettingsValues } from "../types";
-import { EmptyState, LoadingBlock, useNotices } from "../ui";
+import { CollectionCommandBar, EmptyState, LoadingBlock, useNotices } from "../ui";
 
 
-type Preset = "today" | "week" | "month" | "30d" | "custom";
+export type Preset = "today" | "week" | "month" | "30d" | "year" | "custom";
 
 
-function datesFor(
+export function datesFor(
   preset: Preset,
   settings?: Partial<SettingsValues>,
+  now = new Date(),
 ): { start: string; end: string } {
-  const now = new Date();
   const end = dateInput(now, settings?.timezone);
   if (preset === "today") return { start: end, end };
   if (preset === "week") {
@@ -25,6 +25,7 @@ function datesFor(
   if (preset === "month") {
     return { start: `${end.slice(0, 7)}-01`, end };
   }
+  if (preset === "year") return { start: `${end.slice(0, 4)}-01-01`, end };
   return { start: addDays(end, -29), end };
 }
 
@@ -82,9 +83,9 @@ export default function Analytics({ settings }: { settings?: SettingsValues }) {
 
   return (
     <div className="analytics-layout">
-      <section className="workspace analytics-controls">
+      <CollectionCommandBar label="Analytics period">
         <div className="period-presets" role="group" aria-label="Analytics period">
-          {(["today", "week", "month", "30d"] as Preset[]).map((value) => (
+          {(["today", "week", "month", "30d", "year"] as Preset[]).map((value) => (
             <button
               type="button"
               key={value}
@@ -122,7 +123,7 @@ export default function Analytics({ settings }: { settings?: SettingsValues }) {
             />
           </label>
         </div>
-      </section>
+      </CollectionCommandBar>
 
       {loading && !data ? (
         <LoadingBlock label="Calculating analytics..." />
@@ -132,6 +133,7 @@ export default function Analytics({ settings }: { settings?: SettingsValues }) {
             <div className="summary-total">
               <span className="eyebrow">TRACKED TIME</span>
               <strong>{duration(data.total_seconds)}</strong>
+              <span>{data.coverage_percent.toFixed(2)}% of {duration(data.period_seconds)}</span>
               <span>{start} — {end}</span>
             </div>
             <div className="metric-grid">

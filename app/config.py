@@ -66,6 +66,16 @@ class RuntimeConfig:
             kernel_refresh_seconds=kernel_refresh_seconds or self.kernel_refresh_seconds,
         )
 
+    def with_kernel_credentials(
+        self, *, kernel_url: str, kernel_service_token: str
+    ) -> "RuntimeConfig":
+        return replace(
+            self,
+            kernel_url=kernel_url,
+            kernel_service_token=kernel_service_token,
+            register_revision="",
+        )
+
 
 def load_config() -> RuntimeConfig:
     data_dir = Path(os.getenv("CHRONOS_DATA_DIR", ".data")).resolve()
@@ -80,8 +90,11 @@ def load_config() -> RuntimeConfig:
     return RuntimeConfig(
         listen_port=_integer("CHRONOS_LISTEN_PORT", 18280),
         database_url=database_url,
-        admin_username=os.getenv("CHRONOS_ADMIN_USERNAME", ""),
-        admin_password=os.getenv("CHRONOS_ADMIN_PASSWORD", ""),
+        admin_username=os.getenv("CHRONOS_ADMIN_USERNAME", "operator") or "operator",
+        admin_password=(
+            os.getenv("CHRONOS_ACCESS_KEY", "").strip()
+            or os.getenv("CHRONOS_ADMIN_PASSWORD", "")
+        ),
         session_secret=os.getenv("CHRONOS_SESSION_SECRET", ""),
         cookie_secure=_boolean("CHRONOS_COOKIE_SECURE", True),
         trust_proxy=_boolean("CHRONOS_TRUST_PROXY", True),
@@ -117,10 +130,8 @@ def load_config() -> RuntimeConfig:
 
 def validate_runtime_config(config: RuntimeConfig) -> None:
     issues: list[str] = []
-    if not 3 <= len(config.admin_username) <= 64:
-        issues.append("CHRONOS_ADMIN_USERNAME must contain 3-64 characters")
     if len(config.admin_password) < 12 or config.admin_password == "CHANGE_ME":
-        issues.append("CHRONOS_ADMIN_PASSWORD must contain at least 12 characters")
+        issues.append("CHRONOS_ACCESS_KEY must contain at least 12 characters")
     if len(config.session_secret) < 32 or config.session_secret.startswith("replace-"):
         issues.append("CHRONOS_SESSION_SECRET must contain at least 32 characters")
     if not config.database_url.startswith(("postgresql://", "postgres://")):
@@ -129,4 +140,3 @@ def validate_runtime_config(config: RuntimeConfig) -> None:
         issues.append("KERNEL_URL and KERNEL_SERVICE_TOKEN must be configured together")
     if issues:
         raise RuntimeError("; ".join(issues))
-

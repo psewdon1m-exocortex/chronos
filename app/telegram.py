@@ -458,7 +458,14 @@ class TelegramSupervisor:
                 await message.answer("Use the Chronos buttons or a bot command.")
                 return
             result = await timers.press(category, actor="telegram", source="telegram")
-            if result["started"] and result["stopped"]:
+            if result["action"] == "timer.restarted":
+                await message.answer(
+                    f"Restarted {result['started']['public_id']} "
+                    f"({result['started']['label']}). Previous: "
+                    f"{result['stopped']['public_id']} / "
+                    f"{format_duration(result['stopped']['timer_elapsed_seconds'])}."
+                )
+            elif result["started"] and result["stopped"]:
                 await message.answer(
                     f"Switched to {result['started']['label']}. Previous: "
                     f"{result['stopped']['public_id']} / "

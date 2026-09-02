@@ -141,25 +141,24 @@ class TimerService:
                         current,
                     )
                     touched.append(int(active["id"]))
-                if not active or active["category"] != category:
-                    started = await connection.fetchrow(
-                        """
-                        insert into time_sessions
-                            (user_id, category, started_at, note, source)
-                        values ($1, $2, $3, '', $4)
-                        returning *
-                        """,
-                        owner["id"],
-                        category,
-                        current,
-                        source,
-                    )
-                    touched.append(int(started["id"]))
+                started = await connection.fetchrow(
+                    """
+                    insert into time_sessions
+                        (user_id, category, started_at, note, source)
+                    values ($1, $2, $3, '', $4)
+                    returning *
+                    """,
+                    owner["id"],
+                    category,
+                    current,
+                    source,
+                )
+                touched.append(int(started["id"]))
                 action = (
                     "timer.started"
                     if active is None
-                    else "timer.stopped"
-                    if started is None
+                    else "timer.restarted"
+                    if active["category"] == category
                     else "timer.switched"
                 )
                 await self._record_undo(
@@ -898,6 +897,7 @@ class TimerService:
                 bucket[row["category"]] += int((chunk_end - cursor).total_seconds())
                 cursor = chunk_end
         total_seconds = sum(totals.values())
+        period_seconds = max(0, int((end - start).total_seconds()))
         categories = [
             {
                 "category": category,
@@ -913,6 +913,10 @@ class TimerService:
             "start": start.isoformat(),
             "end": end.isoformat(),
             "total_seconds": total_seconds,
+            "period_seconds": period_seconds,
+            "coverage_percent": round(total_seconds * 100 / period_seconds, 2)
+            if period_seconds
+            else 0.0,
             "categories": categories,
             "days": [
                 {"date": key, "total_seconds": sum(values.values()), "categories": values}

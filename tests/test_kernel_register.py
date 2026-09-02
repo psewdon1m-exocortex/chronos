@@ -21,8 +21,7 @@ def snapshot(values: dict) -> dict:
 
 
 def test_register_applies_chronos_runtime_values(monkeypatch) -> None:
-    monkeypatch.setenv("CHRONOS_ADMIN_USERNAME", "operator")
-    monkeypatch.setenv("CHRONOS_ADMIN_PASSWORD", "long-test-password")
+    monkeypatch.setenv("CHRONOS_ACCESS_KEY", "long-test-access-key")
     monkeypatch.setenv("CHRONOS_SESSION_SECRET", "x" * 40)
     config = load_config()
     token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef"
@@ -57,4 +56,3 @@ def test_register_can_resolve_local_secret_reference(monkeypatch) -> None:
         }
     )
     assert apply_register(config, data).telegram_token.startswith("123456789:")
-

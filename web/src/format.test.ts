@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CATEGORY_LABELS,
+  bytes,
   dateInput,
   duration,
   inputDateTime,
@@ -9,6 +10,13 @@ import {
   localDateKey,
   zonedDateTimeToIso,
 } from "./format";
+
+describe("bytes", () => {
+  it("formats bounded telemetry values", () => {
+    expect(bytes(1536)).toBe("1.5 KiB");
+    expect(bytes(null)).toBe("Unavailable");
+  });
+});
 
 describe("duration", () => {
   it("formats compact elapsed time", () => {

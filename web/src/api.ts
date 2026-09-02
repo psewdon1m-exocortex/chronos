@@ -62,3 +62,22 @@ export function download(path: string): void {
   anchor.click();
   anchor.remove();
 }
+
+
+export async function downloadFile(path: string): Promise<string> {
+  const response = await fetch(path, { cache: "no-store", credentials: "same-origin" });
+  if (!response.ok) throw new ApiError(`Download failed with HTTP ${response.status}`, response.status);
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] ?? "chronos-download";
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}

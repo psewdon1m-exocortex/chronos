@@ -110,7 +110,9 @@ def _registered_kernel_url(snapshot: dict[str, Any], bootstrap_url: str) -> str:
     ).geturl()
 
 
-def load_snapshot(config: RuntimeConfig) -> dict[str, Any]:
+def load_snapshot(
+    config: RuntimeConfig, *, use_cache: bool = True, write_cache: bool = True
+) -> dict[str, Any]:
     if not config.kernel_url and not config.kernel_service_token:
         return {}
     if not config.kernel_url or not config.kernel_service_token:
@@ -118,10 +120,11 @@ def load_snapshot(config: RuntimeConfig) -> dict[str, Any]:
             "KERNEL_URL and KERNEL_SERVICE_TOKEN must be configured together"
         )
     cached: dict[str, Any] | None = None
-    try:
-        cached = _read_cache(config.kernel_cache_path)
-    except KernelRegisterError:
-        pass
+    if use_cache:
+        try:
+            cached = _read_cache(config.kernel_cache_path)
+        except KernelRegisterError:
+            pass
     headers = {
         "Authorization": f"Bearer {config.kernel_service_token}",
         "Accept": "application/vnd.exocortex.register+json; version=1",
@@ -145,7 +148,8 @@ def load_snapshot(config: RuntimeConfig) -> dict[str, Any]:
                 if len(body) > 3 * 1024 * 1024:
                     raise KernelRegisterError("Kernel Register response is too large")
                 snapshot = _verify_snapshot(json.loads(body.decode("utf-8")))
-                _write_cache(config.kernel_cache_path, snapshot)
+                if write_cache:
+                    _write_cache(config.kernel_cache_path, snapshot)
                 return snapshot
         except HTTPError as error:
             if error.code == 304 and cached:
@@ -230,4 +234,3 @@ def apply_register(config: RuntimeConfig, snapshot: dict[str, Any]) -> RuntimeCo
         register_revision=snapshot["revision"],
         kernel_refresh_seconds=refresh,
     )
-

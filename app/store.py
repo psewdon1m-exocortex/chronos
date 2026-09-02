@@ -55,6 +55,8 @@ class Store:
         admin_username: str,
         admin_password: str,
         default_timezone: str,
+        kernel_url_seed: str = "",
+        kernel_token_ciphertext_seed: str = "",
     ) -> None:
         async with self.pool.acquire() as connection:
             async with connection.transaction():
@@ -86,6 +88,16 @@ class Store:
                         key,
                         json.dumps(value),
                     )
+                await connection.execute(
+                    """
+                    insert into service_credentials (
+                        id, kernel_url, kernel_token_ciphertext
+                    ) values (1, $1, $2)
+                    on conflict (id) do nothing
+                    """,
+                    kernel_url_seed,
+                    kernel_token_ciphertext_seed,
+                )
 
     async def owner(self, connection: asyncpg.Connection | None = None) -> asyncpg.Record:
         if connection is not None:
@@ -125,12 +137,52 @@ class Store:
             )
             return int(generation)
 
+    async def kernel_credentials(self) -> asyncpg.Record:
+        async with self.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select kernel_url, kernel_token_ciphertext, updated_at
+                from service_credentials where id = 1
+                """
+            )
+            if row is None:
+                raise RuntimeError("Chronos service credentials are not initialized")
+            return row
+
+    async def update_kernel_credentials(
+        self, *, kernel_url: str, kernel_token_ciphertext: str | None = None
+    ) -> None:
+        async with self.pool.acquire() as connection:
+            if kernel_token_ciphertext is None:
+                await connection.execute(
+                    """
+                    update service_credentials
+                    set kernel_url = $1, updated_at = now()
+                    where id = 1
+                    """,
+                    kernel_url,
+                )
+            else:
+                await connection.execute(
+                    """
+                    update service_credentials
+                    set kernel_url = $1,
+                        kernel_token_ciphertext = $2,
+                        updated_at = now()
+                    where id = 1
+                    """,
+                    kernel_url,
+                    kernel_token_ciphertext,
+                )
+
     async def settings(self) -> dict[str, Any]:
         async with self.pool.acquire() as connection:
             rows = await connection.fetch("select key, value from app_settings")
         result = dict(DEFAULT_SETTINGS)
         for row in rows:
-            result[str(row["key"])] = _json_value(row["value"])
+            key = str(row["key"])
+            if key in DEFAULT_SETTINGS:
+                result[key] = _json_value(row["value"])
         return result
 
     async def update_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -149,8 +201,9 @@ class Store:
                     )
         return await self.settings()
 
-    async def create_link_code(self, code: str, lifetime_minutes: int = 10) -> None:
+    async def create_link_code(self, code: str, lifetime_minutes: int = 10) -> datetime:
         digest = hashlib.sha256(code.encode("ascii")).hexdigest()
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes)
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 await connection.execute(
@@ -159,11 +212,12 @@ class Store:
                 await connection.execute(
                     """
                     insert into telegram_link_codes (code_hash, expires_at)
-                    values ($1, now() + ($2 * interval '1 minute'))
+                    values ($1, $2)
                     """,
                     digest,
-                    lifetime_minutes,
+                    expires_at,
                 )
+        return expires_at
 
     async def consume_link_code(self, code: str, tg_user_id: int) -> bool:
         digest = hashlib.sha256(code.upper().encode("ascii")).hexdigest()
@@ -257,18 +311,34 @@ class Store:
                 self.audit_max_entries,
             )
 
-    async def audit_events(self, limit: int = 200) -> list[dict[str, Any]]:
+    async def audit_events(
+        self, limit: int = 200, *, after_id: int | None = None
+    ) -> list[dict[str, Any]]:
         async with self.pool.acquire() as connection:
-            rows = await connection.fetch(
-                """
-                select id, status, action, target, actor, message, details,
-                       request_id, created_at
-                from audit_events
-                order by created_at desc
-                limit $1
-                """,
-                max(1, min(limit, 10000)),
-            )
+            if after_id is None:
+                rows = await connection.fetch(
+                    """
+                    select id, status, action, target, actor, message, details,
+                           request_id, created_at
+                    from audit_events
+                    order by id desc
+                    limit $1
+                    """,
+                    max(1, min(limit, 10000)),
+                )
+            else:
+                rows = await connection.fetch(
+                    """
+                    select id, status, action, target, actor, message, details,
+                           request_id, created_at
+                    from audit_events
+                    where id > $1
+                    order by id desc
+                    limit $2
+                    """,
+                    max(0, after_id),
+                    max(1, min(limit, 10000)),
+                )
         return [
             {
                 "id": int(row["id"]),

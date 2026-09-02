@@ -55,7 +55,7 @@ const SECTIONS = [
     title: "Analytics",
     content: (
       <>
-        <p>Analytics supports today, the current week, the current month, the last 30 days and any custom date range up to 370 days.</p>
+        <p>Analytics supports today, the current week, the current month, the last 30 days, the current year and any custom date range up to 370 days.</p>
         <p>Sessions are clipped at period boundaries. A timer started before midnight contributes only the portion inside the selected day. The active timer is included up to the current moment.</p>
       </>
     ),
@@ -80,7 +80,7 @@ const SECTIONS = [
     title: "Data, backup and updates",
     content: (
       <>
-        <p>PostgreSQL is the authoritative store. Browser storage contains only the local Sidebar order. A backup contains sessions, personalization and the Telegram owner binding; it never includes operator passwords or service tokens.</p>
+        <p>PostgreSQL is the authoritative store, including card and navigation order. A backup contains sessions, personalization and the Telegram owner binding; it never includes the Access Key or service tokens.</p>
         <p>Kernel Register supplies the repository, public domain and Telegram API value with a validated last-known-good cache. The local Updater creates another backup before replacing the immutable Chronos image and can restore it after rollback.</p>
       </>
     ),

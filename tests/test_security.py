@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from app.security import (
     create_session_token,
+    decrypt_service_secret,
+    encrypt_service_secret,
     hash_password,
     verify_password,
     verify_session_token,
@@ -25,3 +27,15 @@ def test_session_token_checks_generation_signature_and_expiry() -> None:
     assert verify_session_token(token, "x" * 40, 4, now=1_001) is None
     assert verify_session_token(token, secret, 4, now=1_000 + 12 * 60 * 60) is None
 
+
+def test_service_secret_is_encrypted_and_bound_to_session_secret() -> None:
+    secret = "s" * 40
+    ciphertext = encrypt_service_secret("kernel-token-value", secret)
+    assert "kernel-token-value" not in ciphertext
+    assert decrypt_service_secret(ciphertext, secret) == "kernel-token-value"
+    try:
+        decrypt_service_secret(ciphertext, "x" * 40)
+    except ValueError as error:
+        assert "cannot be decrypted" in str(error)
+    else:
+        raise AssertionError("A different session secret must not decrypt the credential")

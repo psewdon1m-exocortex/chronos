@@ -14,8 +14,7 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
     if not database_url:
         pytest.skip("TEST_DATABASE_URL is not configured")
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("CHRONOS_ADMIN_USERNAME", "test-operator")
-    monkeypatch.setenv("CHRONOS_ADMIN_PASSWORD", "test-password-long-enough")
+    monkeypatch.setenv("CHRONOS_ACCESS_KEY", "test-access-key-long-enough")
     monkeypatch.setenv("CHRONOS_SESSION_SECRET", "s" * 40)
     monkeypatch.setenv("CHRONOS_COOKIE_SECURE", "false")
     monkeypatch.delenv("KERNEL_URL", raising=False)
@@ -36,7 +35,7 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
         assert client.get("/api/dashboard").status_code == 401
         login = client.post(
             "/api/auth/login",
-            json={"username": "test-operator", "password": "test-password-long-enough"},
+            json={"access_key": "test-access-key-long-enough"},
         )
         assert login.status_code == 200
         csrf = client.cookies.get("chronos_csrf")
@@ -45,6 +44,13 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
         assert dashboard.status_code == 200
         assert dashboard.headers["cache-control"] == "no-store"
         assert dashboard.headers["x-robots-tag"] == "noindex, nofollow, noarchive, nosnippet"
+        assert set(dashboard.json()["telemetry"]) == {
+            "captured_at",
+            "cpu",
+            "ram",
+            "disk",
+            "uptime_seconds",
+        }
         assert [item["key"] for item in dashboard.json()["categories"]] == [
             "recovery",
             "accumulation",

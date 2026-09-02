@@ -13,6 +13,7 @@ import {
 import type { Category, Session, SettingsValues } from "../types";
 import {
   ConfirmOverlay,
+  CollectionCommandBar,
   EmptyState,
   LoadingBlock,
   Overlay,
@@ -174,7 +175,7 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
 
   return (
     <section className="workspace timeline-workspace">
-      <div className="toolbar timeline-toolbar">
+      <CollectionCommandBar label="Timeline commands">
         <SearchField value={query} onChange={setQuery} placeholder="Search session notes" />
         <label className="compact-field">
           <span>CATEGORY</span>
@@ -186,13 +187,13 @@ export default function Timeline({ settings }: { settings?: SettingsValues }) {
           </select>
         </label>
         <span className="result-count">{total} sessions</span>
-        <button type="button" onClick={() => download("/api/export.csv")} data-smart-hover>
-          Export CSV
-        </button>
         <button type="button" onClick={() => setEditor(defaultEditor(settings?.timezone))} data-smart-hover>
           Add session
         </button>
-      </div>
+        <button type="button" onClick={() => download("/api/export.csv")} data-smart-hover>
+          Export CSV
+        </button>
+      </CollectionCommandBar>
 
       {sessions === null ? (
         <LoadingBlock label="Loading timeline..." />

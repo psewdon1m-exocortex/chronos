@@ -26,6 +26,8 @@ export interface Analytics {
   start: string;
   end: string;
   total_seconds: number;
+  period_seconds: number;
+  coverage_percent: number;
   categories: CategoryMetric[];
   days: Array<{
     date: string;
@@ -43,6 +45,20 @@ export interface DashboardData {
   today: Analytics;
   recent: Session[];
   telegram: TelegramStatus;
+  telemetry: Telemetry;
+}
+
+export interface Telemetry {
+  captured_at: number;
+  cpu: { percent: number | null; logical_cores: number };
+  ram: { percent: number | null; used_bytes: number | null; total_bytes: number | null };
+  disk: {
+    percent: number | null;
+    used_bytes: number | null;
+    total_bytes: number | null;
+    scope: string;
+  };
+  uptime_seconds: number;
 }
 
 export interface TelegramStatus {
@@ -62,10 +78,13 @@ export interface SettingsValues {
   reminder_minutes: number;
   daily_summary_enabled: boolean;
   daily_summary_time: string;
-  theme_dark: string;
-  theme_light: string;
   theme_accent: string;
   sidebar_auto_hide: boolean;
+  navigation_order: Array<"dashboard" | "timeline" | "analytics" | "settings">;
+  dashboard_order: Array<"cpu" | "ram" | "disk" | "uptime" | "current" | "today" | "recent">;
+  settings_order: Array<
+    "appearance" | "security" | "backup" | "updates" | "logs" | "personalization" | "telegram"
+  >;
 }
 
 export interface SettingsResponse {
@@ -75,6 +94,9 @@ export interface SettingsResponse {
     public_url: string;
     repository_url: string;
     register_revision: string | null;
+    kernel_url: string | null;
+    kernel_reachable: boolean;
+    kernel_configured: boolean;
   };
   telegram: TelegramStatus;
 }

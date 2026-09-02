@@ -163,9 +163,20 @@ export function liveSeconds(snapshotSeconds: number, elapsedMilliseconds: number
 }
 
 
-export function applyTheme(dark: string, light: string, accent: string): void {
+export function applyTheme(accent: string): void {
   const root = document.documentElement;
-  root.style.setProperty("--dark", dark);
-  root.style.setProperty("--light", light);
   root.style.setProperty("--accent", accent);
+}
+
+
+export function bytes(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "Unavailable";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let current = Math.max(0, value);
+  let unit = 0;
+  while (current >= 1024 && unit < units.length - 1) {
+    current /= 1024;
+    unit += 1;
+  }
+  return `${current >= 10 || unit === 0 ? current.toFixed(0) : current.toFixed(1)} ${units[unit]}`;
 }

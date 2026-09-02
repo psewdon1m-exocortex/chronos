@@ -1,33 +1,48 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "./api";
+import { ChronosMark, StatusSquare } from "./ui";
 
+type Reachability = "checking" | "available" | "unavailable";
 
 export default function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [login, setLogin] = useState("");
-  const [password, setPassword] = useState("");
+  const [accessKey, setAccessKey] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const loginRef = useRef<HTMLInputElement>(null);
+  const [reachability, setReachability] = useState<Reachability>("checking");
+  const accessKeyRef = useRef<HTMLInputElement>(null);
+
+  const checkReachability = useCallback(async () => {
+    try {
+      const result = await api<{ status: string }>("/api/public/reachability");
+      setReachability(result.status === "available" ? "available" : "unavailable");
+    } catch {
+      setReachability("unavailable");
+    }
+  }, []);
 
   useEffect(() => {
-    loginRef.current?.focus();
-  }, []);
+    accessKeyRef.current?.focus();
+    void checkReachability();
+    const timer = window.setInterval(() => void checkReachability(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [checkReachability]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!login.trim() || !password || pending) return;
+    if (!accessKey || pending) return;
     setPending(true);
     setError("");
     try {
       await api("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ username: login.trim(), password }),
+        body: JSON.stringify({ access_key: accessKey }),
       });
+      setAccessKey("");
       onAuthenticated();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Sign-in failed.");
-      window.setTimeout(() => loginRef.current?.focus(), 0);
+      setError(failure instanceof Error ? failure.message : "Access denied.");
+      window.setTimeout(() => accessKeyRef.current?.focus(), 0);
     } finally {
       setPending(false);
     }
@@ -35,41 +50,34 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
 
   return (
     <main className="login-view">
-      <section className="login-panel">
-        <header>
-          <h1 aria-label="CHRONOS">
-            {"CHRONOS".split("").map((letter, index) => <span key={`${letter}-${index}`}>{letter}</span>)}
-          </h1>
-          <div className="availability">
-            <span aria-hidden="true" />
-            AVAILABLE
+      <div className="login-composition">
+        <div className="login-brand" aria-label="Chronos">
+          <span>Chronos</span>
+          <ChronosMark compact />
+        </div>
+        <section className="login-panel" aria-label="Enter Chronos">
+          <div className={`availability availability-${reachability}`} role="status">
+            <span>Service reachability</span>
+            <StatusSquare state={reachability === "available" ? "success" : reachability === "unavailable" ? "danger" : "neutral"} />
           </div>
-        </header>
-        <form onSubmit={submit}>
-          <input
-            ref={loginRef}
-            aria-label="Login"
-            autoComplete="username"
-            placeholder="Login"
-            value={login}
-            onChange={(event) => setLogin(event.target.value)}
-            required
-          />
-          <input
-            aria-label="Password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="Password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-          {error && <p className="login-error" role="alert">{error}</p>}
-          <button type="submit" disabled={!login.trim() || !password || pending} data-smart-hover>
-            {pending ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
-      </section>
+          <form onSubmit={submit}>
+            <input
+              ref={accessKeyRef}
+              aria-label="Access Key"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Access Key..."
+              value={accessKey}
+              onChange={(event) => setAccessKey(event.target.value)}
+              required
+            />
+            {error && <p className="login-error" role="alert">{error}</p>}
+            <button type="submit" disabled={!accessKey || pending} data-smart-hover>
+              {pending ? "Entering..." : "Enter service"}
+            </button>
+          </form>
+        </section>
+      </div>
     </main>
   );
 }
