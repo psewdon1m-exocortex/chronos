@@ -26,7 +26,15 @@ from pydantic import BaseModel, Field
 from .config import RuntimeConfig, load_config, validate_runtime_config
 from .constants import CATEGORIES, CATEGORY_LABELS, DEFAULT_SETTINGS
 from .database import create_pool, run_migrations
-from .kernel_register import KernelRegisterError, apply_register, load_snapshot
+from .gryphon import (
+    ChronosNotificationSupervisor,
+    GryphonCommandService,
+    GryphonClient,
+    GryphonError,
+    GryphonNotifier,
+)
+from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value
+from .neptune import NeptuneClient, NeptuneError
 from .runtime import RuntimeState
 from .security import (
     create_session_token,
@@ -34,14 +42,12 @@ from .security import (
     encrypt_service_secret,
     hash_password,
     new_csrf_token,
-    new_link_code,
     validate_new_access_key,
     verify_password,
     verify_session_token,
 )
 from .store import Store
 from .telemetry import TelemetrySampler
-from .telegram import TelegramSupervisor
 from .timer_service import TimerError, TimerService, timezone_for
 from .updater import UpdaterClient, UpdaterError, check_github_release
 
@@ -118,6 +124,11 @@ class KernelTokenInput(BaseModel):
     kernel_url: str = Field(min_length=1, max_length=2048)
     new_token: str = Field(min_length=24, max_length=4096)
     confirm_token: str = Field(min_length=24, max_length=4096)
+
+
+class NeptuneScheduleInput(BaseModel):
+    enabled: bool
+    interval_hours: int = Field(ge=1, le=8760)
 
 
 class UpdateInput(BaseModel):
@@ -248,8 +259,8 @@ def _validate_settings(data: SettingsInput) -> dict[str, Any]:
         "navigation_order": {"dashboard", "timeline", "analytics", "settings"},
         "dashboard_order": {"cpu", "ram", "disk", "uptime", "current", "today", "recent"},
         "settings_order": {
-            "appearance", "security", "backup", "updates", "logs",
-            "personalization", "telegram",
+            "appearance", "security", "backup", "gryphon", "updates", "logs",
+            "personalization",
         },
     }
     for name, expected in orders.items():
@@ -289,7 +300,7 @@ async def _validated_kernel_config(
         snapshot = await asyncio.to_thread(
             load_snapshot, candidate, use_cache=False, write_cache=False
         )
-        return apply_register(candidate, snapshot)
+        return await asyncio.to_thread(apply_register, candidate, snapshot)
     except KernelRegisterError as error:
         raise HTTPException(
             status_code=400,
@@ -344,7 +355,7 @@ async def _load_register_once(app: FastAPI) -> None:
     previous = runtime.config.register_revision
     try:
         snapshot = await asyncio.to_thread(load_snapshot, runtime.config)
-        updated = apply_register(runtime.config, snapshot)
+        updated = await asyncio.to_thread(apply_register, runtime.config, snapshot)
         await runtime.replace(updated)
         if updated.register_revision and updated.register_revision != previous:
             await store.audit(
@@ -408,26 +419,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_runtime_config(config)
     runtime = RuntimeState(config)
     timers = TimerService(store)
-    telegram = TelegramSupervisor(runtime, store, timers)
+    gryphon = GryphonCommandService(store, timers)
+    gryphon_client = GryphonClient(
+        config.gryphon_socket_path,
+        config.gryphon_service_token_file,
+        config.gryphon_timeout_seconds,
+    )
+    notifications = ChronosNotificationSupervisor(
+        store,
+        timers,
+        gryphon,
+        GryphonNotifier(gryphon_client),
+    )
     app.state.pool = pool
     app.state.store = store
     app.state.runtime = runtime
     app.state.timers = timers
-    app.state.telegram = telegram
+    app.state.gryphon = gryphon
+    app.state.gryphon_client = gryphon_client
     app.state.telemetry = TelemetrySampler(config.data_dir)
     app.state.updater = UpdaterClient(
         config.updater_socket_path, config.updater_control_token, config.updater_head_id
     )
+    app.state.neptune = NeptuneClient(
+        config.neptune_socket_path, config.neptune_project_id, config.neptune_control_token_file
+    )
     await _load_register_once(app)
     register_task = asyncio.create_task(_register_refresh_loop(app), name="kernel-register-refresh")
-    telegram_task = asyncio.create_task(telegram.run(), name="telegram-supervisor")
+    notification_task = asyncio.create_task(
+        notifications.run(), name="gryphon-notification-supervisor"
+    )
     try:
         yield
     finally:
         register_task.cancel()
-        await telegram.stop()
-        telegram_task.cancel()
-        for task in (register_task, telegram_task):
+        await notifications.stop()
+        notification_task.cancel()
+        for task in (register_task, notification_task):
             with suppress(asyncio.CancelledError):
                 await task
         await pool.close()
@@ -477,6 +505,14 @@ def create_app() -> FastAPI:
     async def updater_error(_: Request, error: UpdaterError):
         return JSONResponse(status_code=error.status, content={"error": str(error)})
 
+    @app.exception_handler(NeptuneError)
+    async def neptune_error(_: Request, error: NeptuneError):
+        return JSONResponse(status_code=error.status, content={"error": str(error)})
+
+    @app.exception_handler(GryphonError)
+    async def gryphon_error(_: Request, error: GryphonError):
+        return JSONResponse(status_code=error.status, content={"error": str(error)})
+
     @app.get("/robots.txt", include_in_schema=False)
     async def robots_txt():
         return Response(content=ROBOTS_POLICY, media_type="text/plain")
@@ -486,7 +522,6 @@ def create_app() -> FastAPI:
         if _is_proxied_request(request):
             raise HTTPException(status_code=404, detail="Not found")
         runtime: RuntimeState = request.app.state.runtime
-        telegram: TelegramSupervisor = request.app.state.telegram
         try:
             await request.app.state.pool.fetchval("select 1")
             database = "available"
@@ -498,7 +533,6 @@ def create_app() -> FastAPI:
             "service": "chronos",
             "version": runtime.config.version,
             "database": database,
-            "telegram": telegram.status,
             "register_revision": runtime.config.register_revision or None,
         }
 
@@ -600,10 +634,6 @@ def create_app() -> FastAPI:
             "active": active,
             "today": analytics,
             "recent": recent["items"],
-            "telegram": {
-                **request.app.state.telegram.status,
-                "linked": bool(await store.telegram_owner_id()),
-            },
             "telemetry": request.app.state.telemetry.sample(),
         }
 
@@ -749,10 +779,6 @@ def create_app() -> FastAPI:
                 "kernel_url": runtime.config.kernel_url or None,
                 "kernel_reachable": bool(runtime.config.register_revision),
                 "kernel_configured": bool(stored_kernel["kernel_token_ciphertext"]),
-            },
-            "telegram": {
-                **request.app.state.telegram.status,
-                "linked": bool(await request.app.state.store.telegram_owner_id()),
             },
         }
 
@@ -926,36 +952,22 @@ def create_app() -> FastAPI:
         _clear_sensitive_rate(request, "kernel-token")
         return {"changed": True, "kernel_url": updated.kernel_url, "kernel_reachable": True}
 
-    @app.post("/api/telegram/link-code")
-    async def telegram_link_code(
-        request: Request, _: dict[str, Any] = Depends(mutation_operator)
+    @app.post("/api/internal/gryphon/command")
+    async def gryphon_command(
+        request: Request,
+        body: dict[str, Any],
+        authorization: str | None = Header(default=None),
     ):
-        if await request.app.state.store.telegram_owner_id():
-            raise HTTPException(status_code=409, detail="Telegram is already linked")
-        code = new_link_code()
-        expires_at = await request.app.state.store.create_link_code(code)
-        await request.app.state.store.audit(
-            status="info",
-            action="telegram.link_code_created",
-            target="owner",
-            actor="operator",
-            message="One-time Telegram link code created",
+        token_file = request.app.state.runtime.config.gryphon_service_token_file
+        expected = (
+            token_file.read_text(encoding="utf-8").strip()
+            if token_file.is_file()
+            else ""
         )
-        return {"code": code, "expires_at": expires_at.isoformat(), "expires_in_seconds": 600}
-
-    @app.delete("/api/telegram/link")
-    async def telegram_unlink(
-        request: Request, _: dict[str, Any] = Depends(mutation_operator)
-    ):
-        await request.app.state.store.unlink_telegram()
-        await request.app.state.store.audit(
-            status="success",
-            action="telegram.unlinked",
-            target="owner",
-            actor="operator",
-            message="Telegram account unlinked",
-        )
-        return {"linked": False}
+        supplied = (authorization or "").removeprefix("Bearer ")
+        if not expected or not hmac.compare_digest(supplied, expected):
+            raise HTTPException(status_code=401, detail="Gryphon token is required")
+        return await request.app.state.gryphon.handle(body)
 
     @app.get("/api/backup/export")
     async def export_backup(request: Request, _: dict[str, Any] = Depends(operator)):
@@ -974,6 +986,113 @@ def create_app() -> FastAPI:
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    @app.post("/api/internal/neptune/backup")
+    async def export_neptune_backup(request: Request, authorization: str | None = Header(default=None)):
+        token_file = request.app.state.runtime.config.neptune_export_token_file
+        expected = token_file.read_text(encoding="utf-8").strip() if token_file.is_file() else ""
+        supplied = (authorization or "").removeprefix("Bearer ")
+        if not expected or not hmac.compare_digest(supplied, expected):
+            raise HTTPException(status_code=401, detail="Neptune export token is required")
+        backup = await request.app.state.store.logical_backup()
+        archive = _backup_zip(backup, request.app.state.runtime.config.version)
+        checksum = hashlib.sha256(archive).hexdigest()
+        return Response(
+            archive,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": 'attachment; filename="chronos-neptune-backup.zip"',
+                "X-Neptune-Archive-Schema": "exocortex-chronos-backup-archive",
+                "X-Neptune-Archive-Sha256": checksum,
+                "X-Neptune-Source-Version": request.app.state.runtime.config.version,
+            },
+        )
+
+    @app.get("/api/neptune/status")
+    async def neptune_status(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await request.app.state.neptune.status()
+
+    @app.put("/api/neptune/schedule", status_code=204)
+    async def neptune_schedule(request: Request, body: NeptuneScheduleInput, _: dict[str, Any] = Depends(mutation_operator)):
+        await request.app.state.neptune.schedule(body.enabled, body.interval_hours)
+        return Response(status_code=204)
+
+    @app.post("/api/neptune/runs", status_code=202)
+    async def neptune_run(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        return await request.app.state.neptune.run()
+
+    @app.post("/api/neptune/update/check")
+    async def neptune_update_check(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        config = request.app.state.runtime.config
+        snapshot = await asyncio.to_thread(load_snapshot, config)
+        repository = register_value(snapshot, "repositories.neptune.url")
+        if not isinstance(repository, str) or not repository:
+            raise HTTPException(status_code=409, detail="Register key repositories.neptune.url is missing")
+        status = await request.app.state.neptune.status()
+        return await check_github_release(repository, str(status["version"]), config.update_check_timeout_seconds, "neptune-linux")
+
+    @app.post("/api/neptune/update/install")
+    async def neptune_update_install(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        requested_version = str(body.get("version") or "")
+        config = request.app.state.runtime.config
+        snapshot = await asyncio.to_thread(load_snapshot, config)
+        repository = register_value(snapshot, "repositories.neptune.url")
+        if not repository:
+            raise HTTPException(status_code=409, detail="Register key repositories.neptune.url is missing")
+        status = await request.app.state.neptune.status()
+        update = await check_github_release(repository, str(status["version"]), config.update_check_timeout_seconds, "neptune-linux")
+        if not update["update_available"] or update["available_version"] != requested_version:
+            raise HTTPException(status_code=409, detail="Requested Neptune version is not the current upgrade candidate")
+        return await request.app.state.updater.update_neptune(requested_version)
+
+    @app.get("/api/gryphon/status")
+    async def gryphon_status(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await request.app.state.gryphon_client.status()
+
+    @app.get("/api/gryphon/bots")
+    async def gryphon_bots(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await request.app.state.gryphon_client.bots()
+
+    @app.put("/api/gryphon/connection")
+    async def gryphon_connect(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        bot_id = str(body.get("botId") or "")
+        result = await request.app.state.gryphon_client.connect(
+            bot_id, request.app.state.runtime.config.gryphon_adapter_url
+        )
+        await request.app.state.store.audit(
+            status="success",
+            action="gryphon.connection.created",
+            target=bot_id,
+            actor="operator",
+            message="Chronos function linked to a Gryphon bot",
+        )
+        return result
+
+    @app.delete("/api/gryphon/connection")
+    async def gryphon_disconnect(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        result = await request.app.state.gryphon_client.disconnect()
+        await request.app.state.store.audit(
+            status="success",
+            action="gryphon.connection.removed",
+            target="chronos",
+            actor="operator",
+            message="Chronos function unlinked from Gryphon",
+        )
+        return result
+
+    @app.post("/api/gryphon/update/check")
+    async def gryphon_update_check(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        status = await request.app.state.gryphon_client.status()
+        return await request.app.state.updater.check_gryphon(str(status["version"]))
+
+    @app.post("/api/gryphon/update/install")
+    async def gryphon_update_install(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        requested_version = str(body.get("version") or "")
+        status = await request.app.state.gryphon_client.status()
+        update = await request.app.state.updater.check_gryphon(str(status["version"]))
+        if not update["update_available"] or update["available_version"] != requested_version:
+            raise HTTPException(status_code=409, detail="Requested Gryphon version is not the current upgrade candidate")
+        return await request.app.state.updater.update_gryphon(requested_version)
 
     async def parse_backup_upload(file: UploadFile) -> dict[str, Any]:
         body = await file.read(64 * 1024 * 1024 + 1)

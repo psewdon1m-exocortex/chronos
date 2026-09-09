@@ -20,20 +20,6 @@ class TimeSession:
     duration_seconds: int | None
 
 
-async def ensure_user(conn: asyncpg.Connection, tg_user_id: int) -> int:
-    row = await conn.fetchrow(
-        """
-        insert into users (tg_user_id)
-        values ($1)
-        on conflict (tg_user_id) do update
-        set tg_user_id = excluded.tg_user_id
-        returning id
-        """,
-        tg_user_id,
-    )
-    return int(row["id"])
-
-
 async def get_active_session(
     conn: asyncpg.Connection, user_id: int
 ) -> TimeSession | None:

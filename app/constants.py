@@ -42,10 +42,10 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "appearance",
         "security",
         "backup",
+        "gryphon",
         "updates",
         "logs",
         "personalization",
-        "telegram",
     ],
 }
 

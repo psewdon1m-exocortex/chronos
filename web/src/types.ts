@@ -44,7 +44,6 @@ export interface DashboardData {
   active: Session | null;
   today: Analytics;
   recent: Session[];
-  telegram: TelegramStatus;
   telemetry: Telemetry;
 }
 
@@ -61,14 +60,6 @@ export interface Telemetry {
   uptime_seconds: number;
 }
 
-export interface TelegramStatus {
-  configured: boolean;
-  running: boolean;
-  linked: boolean;
-  username?: string | null;
-  last_error?: string | null;
-}
-
 export interface SettingsValues {
   profile_name: string;
   timezone: string;
@@ -83,7 +74,7 @@ export interface SettingsValues {
   navigation_order: Array<"dashboard" | "timeline" | "analytics" | "settings">;
   dashboard_order: Array<"cpu" | "ram" | "disk" | "uptime" | "current" | "today" | "recent">;
   settings_order: Array<
-    "appearance" | "security" | "backup" | "updates" | "logs" | "personalization" | "telegram"
+    "appearance" | "security" | "backup" | "gryphon" | "updates" | "logs" | "personalization"
   >;
 }
 
@@ -98,7 +89,6 @@ export interface SettingsResponse {
     kernel_reachable: boolean;
     kernel_configured: boolean;
   };
-  telegram: TelegramStatus;
 }
 
 export interface AuditEvent {

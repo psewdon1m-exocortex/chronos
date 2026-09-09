@@ -16,7 +16,6 @@ class DbConfig:
 
 @dataclass(frozen=True)
 class AppConfig:
-    bot_token: str
     timezone: str
     db: DbConfig
 
@@ -31,7 +30,6 @@ def load_config() -> AppConfig:
         sslmode=os.getenv("DB_SSLMODE", "disable"),
     )
     return AppConfig(
-        bot_token=os.getenv("BOT_TOKEN", ""),
         timezone=os.getenv("TZ", "UTC"),
         db=db,
     )

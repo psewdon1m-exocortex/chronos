@@ -15,7 +15,10 @@ from .config import RuntimeConfig
 
 SNAPSHOT_SCHEMA = "exocortex.register.snapshot.v1"
 REVISION_PATTERN = re.compile(r"^register-[A-Za-z0-9-]+$")
-TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
+VOLT_REFERENCE_PATTERN = re.compile(
+    r"^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 class KernelRegisterError(RuntimeError):
@@ -79,35 +82,17 @@ def _resolve(values: dict[str, Any], key: str) -> Any:
     return cursor
 
 
+def register_value(snapshot: dict[str, Any], key: str) -> Any:
+    values = snapshot.get("values")
+    return _resolve(values, key) if isinstance(values, dict) else None
+
+
 def _first_string(values: dict[str, Any], keys: tuple[str, ...]) -> str:
     for key in keys:
         value = _resolve(values, key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
-
-
-def _registered_kernel_url(snapshot: dict[str, Any], bootstrap_url: str) -> str:
-    values = snapshot["values"]
-    sni = _first_string(values, ("services.kernel.sni",))
-    port_value = _first_string(values, ("services.kernel.port",))
-    if not sni or not port_value:
-        return bootstrap_url
-    try:
-        port = int(port_value)
-    except ValueError:
-        return bootstrap_url
-    if not 1 <= port <= 65535:
-        return bootstrap_url
-    parsed = urlparse(bootstrap_url)
-    check = urlparse(f"http://{sni}")
-    if parsed.scheme not in {"http", "https"} or not check.hostname:
-        return bootstrap_url
-    host = f"[{sni}]" if ":" in sni and not sni.startswith("[") else sni
-    public_port = "" if port == 443 else f":{port}"
-    return parsed._replace(
-        netloc=f"{host}{public_port}", path="", params="", query="", fragment=""
-    ).geturl()
 
 
 def load_snapshot(
@@ -133,10 +118,6 @@ def load_snapshot(
     if cached:
         headers["If-None-Match"] = f'"{cached["revision"]}"'
     urls = [config.kernel_url.rstrip("/")]
-    if cached:
-        registered = _registered_kernel_url(cached, config.kernel_url).rstrip("/")
-        if registered not in urls:
-            urls.insert(0, registered)
     last_error: Exception | None = None
     for remote_url in urls:
         request = Request(
@@ -192,35 +173,91 @@ def _public_url(values: dict[str, Any], current: str) -> str:
     return f"https://{host}{'' if port == 443 else f':{port}'}"
 
 
-def _secret_value(value: str) -> str:
-    if value.startswith("secret://env/"):
-        env_name = value.removeprefix("secret://env/")
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", env_name):
-            raise KernelRegisterError("invalid secret environment reference")
-        return os.getenv(env_name, "").strip()
-    return value
+def _resolve_kernel_values(
+    config: RuntimeConfig,
+    keys: list[str],
+    *,
+    opener=urlopen,
+) -> dict[str, str]:
+    remote_url = config.kernel_url.rstrip("/")
+    request = Request(
+        f"{remote_url}/api/v1/register/resolve",
+        data=json.dumps({"keys": keys}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {config.kernel_service_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"exocortex-chronos/{config.version}",
+        },
+        method="POST",
+    )
+    try:
+        with opener(request, timeout=config.kernel_timeout_seconds) as response:
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise KernelRegisterError("Kernel resolution response is too large")
+        payload = json.loads(raw.decode("utf-8"))
+        if payload.get("schema") != "exocortex.register.resolution.v1":
+            raise KernelRegisterError("Kernel returned an unsupported resolution response")
+        resolved: dict[str, str] = {}
+        for key in keys:
+            value = payload["values"][key]["value"]
+            if not isinstance(value, str):
+                raise KernelRegisterError("Kernel returned an unsupported resolution response")
+            resolved[key] = value
+        return resolved
+    except (
+        HTTPError,
+        URLError,
+        TimeoutError,
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        KernelRegisterError,
+    ) as error:
+        raise KernelRegisterError("Kernel value resolution failed") from error
 
 
-def apply_register(config: RuntimeConfig, snapshot: dict[str, Any]) -> RuntimeConfig:
+def _replace_resolved(values: dict[str, Any], resolved: dict[str, str]) -> dict[str, Any]:
+    copied = json.loads(json.dumps(values))
+    for key, value in resolved.items():
+        cursor = copied
+        parts = key.split(".")
+        for part in parts[:-1]:
+            cursor = cursor[part]
+        cursor[parts[-1]] = value
+    return copied
+
+
+def apply_register(
+    config: RuntimeConfig, snapshot: dict[str, Any], *, kernel_opener=urlopen
+) -> RuntimeConfig:
     if not snapshot:
         return config
-    values = snapshot["values"]
+    stored_values = snapshot["values"]
+    candidate_keys = (
+        "repositories.chronos.url",
+        "services.chronos.url",
+        "services.chronos.sni",
+        "services.chronos.port",
+        "intervals.kernel.refresh_sec",
+    )
+    present = [key for key in candidate_keys if _resolve(stored_values, key) is not None]
+    for key in present:
+        reference = _resolve(stored_values, key)
+        if not isinstance(reference, str) or not VOLT_REFERENCE_PATTERN.fullmatch(reference):
+            raise KernelRegisterError(f"Kernel Register key {key} must use volt://<entry-id>/<field-id>")
+    values = _replace_resolved(
+        stored_values,
+        _resolve_kernel_values(config, present, opener=kernel_opener) if present else {},
+    )
     repository = _first_string(values, ("repositories.chronos.url",))
     if repository:
         repository = _https_url(repository, "repositories.chronos.url")
     else:
         repository = config.repository_url
-    telegram = _first_string(
-        values,
-        (
-            "secrets.chronos.telegram_bot_token",
-            "services.chronos.telegram_api",
-            "services.chronos.telegram_bot_api",
-        ),
-    )
-    telegram = _secret_value(telegram) if telegram else config.telegram_token
-    if telegram and not TELEGRAM_TOKEN_PATTERN.fullmatch(telegram):
-        raise KernelRegisterError("Chronos Telegram API token has an invalid format")
     refresh_value = _resolve(values, "intervals.kernel.refresh_sec")
     try:
         refresh = int(refresh_value)
@@ -230,7 +267,6 @@ def apply_register(config: RuntimeConfig, snapshot: dict[str, Any]) -> RuntimeCo
     return config.with_register(
         repository_url=repository,
         public_url=_public_url(values, config.public_url),
-        telegram_token=telegram,
         register_revision=snapshot["revision"],
         kernel_refresh_seconds=refresh,
     )

@@ -3,10 +3,10 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api, downloadFile } from "../api";
 import { applyTheme, localDate } from "../format";
 import type { AuditEvent, SettingsResponse, SettingsValues } from "../types";
-import { ConfirmOverlay, EmptyState, LoadingBlock, Overlay, StatusSquare, SubmitButton, UniversalCard, useNotices } from "../ui";
+import { EmptyState, LoadingBlock, Overlay, StatusSquare, SubmitButton, UniversalCard, useNotices } from "../ui";
 
 type SettingsKey = SettingsValues["settings_order"][number];
-const DEFAULT_ORDER: SettingsKey[] = ["appearance", "security", "backup", "updates", "logs", "personalization", "telegram"];
+const DEFAULT_ORDER: SettingsKey[] = ["appearance", "security", "backup", "gryphon", "updates", "logs", "personalization"];
 
 interface UpdateStatus {
   service: string;
@@ -29,6 +29,35 @@ interface BackupInspection {
   created_at: string | null;
   session_count: number;
   restore_mode: "replace";
+}
+
+interface NeptuneStatus {
+  product: string;
+  version: string;
+  client_instance_id: string;
+  project: { projectId: string; enabled: boolean; interval_hours: number; next_run_at?: string };
+  active: boolean;
+  last_attempt_at?: string;
+  last_success_at?: string;
+  latest_error?: string;
+}
+
+interface GryphonStatus {
+  version: string;
+  serviceId: string;
+  state: string;
+  connected: boolean;
+  commandPrefix: string | null;
+  bot: { id: string; alias: string; username?: string; state: string } | null;
+  binding: { linkedAt: string } | null;
+}
+
+interface GryphonBot {
+  id: string;
+  alias: string;
+  username?: string;
+  state: string;
+  selected: boolean;
 }
 
 const FALLBACK_ZONES = ["UTC", "Europe/Istanbul", "Europe/Moscow", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Tokyo"];
@@ -82,14 +111,23 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [inspection, setInspection] = useState<BackupInspection | null>(null);
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState("");
+  const [neptune, setNeptune] = useState<NeptuneStatus | null>(null);
+  const [neptuneInterval, setNeptuneInterval] = useState(24);
+  const [neptunePending, setNeptunePending] = useState(false);
+  const [neptuneError, setNeptuneError] = useState("");
+  const [neptuneRelease, setNeptuneRelease] = useState<ReleaseCheck | null>(null);
+  const [gryphon, setGryphon] = useState<GryphonStatus | null>(null);
+  const [gryphonBots, setGryphonBots] = useState<GryphonBot[]>([]);
+  const [gryphonBotId, setGryphonBotId] = useState("");
+  const [gryphonConnectionOpen, setGryphonConnectionOpen] = useState(false);
+  const [gryphonPending, setGryphonPending] = useState(false);
+  const [gryphonError, setGryphonError] = useState("");
+  const [gryphonRelease, setGryphonRelease] = useState<ReleaseCheck | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [release, setRelease] = useState<ReleaseCheck | null>(null);
   const [updatePending, setUpdatePending] = useState(false);
   const [job, setJob] = useState<Record<string, unknown> | null>(null);
   const [jobId, setJobId] = useState("");
-  const [linkCode, setLinkCode] = useState<{ code: string; expiresAt: string } | null>(null);
-  const [clock, setClock] = useState(Date.now());
-  const [unlinkOpen, setUnlinkOpen] = useState(false);
   const [dragged, setDragged] = useState<SettingsKey | null>(null);
   const [drop, setDrop] = useState<{ key: SettingsKey; after: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -128,17 +166,24 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   }, [loadLogs, notify, onSettingsChanged]);
 
   useEffect(() => { void load(); }, [load]);
+  const loadNeptune = useCallback(async () => {
+    try {
+      const status = await api<NeptuneStatus>("/api/neptune/status");
+      setNeptune(status); setNeptuneInterval(status.project.interval_hours); setNeptuneError("");
+    } catch (error) { setNeptune(null); setNeptuneError(error instanceof Error ? error.message : "Unavailable"); }
+  }, []);
+  useEffect(() => { void loadNeptune(); }, [loadNeptune]);
+  const loadGryphon = useCallback(async () => {
+    try {
+      const status = await api<GryphonStatus>("/api/gryphon/status");
+      setGryphon(status); setGryphonError("");
+    } catch (error) { setGryphon(null); setGryphonError(error instanceof Error ? error.message : "Unavailable"); }
+  }, []);
+  useEffect(() => { void loadGryphon(); }, [loadGryphon]);
   useEffect(() => {
     const timer = window.setInterval(() => void loadLogs(true), 5_000);
     return () => window.clearInterval(timer);
   }, [loadLogs]);
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    if (linkCode && Date.parse(linkCode.expiresAt) <= clock) setLinkCode(null);
-  }, [clock, linkCode]);
   useEffect(() => {
     if (!jobId) return;
     const terminal = new Set(["COMPLETED", "FAILED", "ROLLED_BACK", "ROLLBACK_FAILED"]);
@@ -243,28 +288,6 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     }
   };
 
-  const createLinkCode = async () => {
-    try {
-      const result = await api<{ code: string; expires_at: string }>("/api/telegram/link-code", { method: "POST" });
-      setLinkCode({ code: result.code, expiresAt: result.expires_at });
-      notify("info", "One-time Telegram link code created.");
-    } catch (error) {
-      notify("error", error instanceof Error ? error.message : "Link code could not be created.");
-    }
-  };
-
-  const unlinkTelegram = async () => {
-    try {
-      await api("/api/telegram/link", { method: "DELETE" });
-      setLinkCode(null);
-      setUnlinkOpen(false);
-      notify("success", "Telegram account unlinked.");
-      await load();
-    } catch (error) {
-      notify("error", error instanceof Error ? error.message : "Telegram could not be unlinked.");
-    }
-  };
-
   const inspectRestore = async (file: File) => {
     setRestoreFile(file);
     setInspection(null);
@@ -300,6 +323,95 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  const saveNeptune = async (enabled: boolean) => {
+    setNeptunePending(true);
+    try {
+      await api("/api/neptune/schedule", { method: "PUT", body: JSON.stringify({ enabled, interval_hours: neptuneInterval }) });
+      await loadNeptune();
+      notify("success", enabled ? "Automatic Saturn backup enabled." : "Automatic Saturn backup disabled.");
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune schedule could not be saved."); }
+    finally { setNeptunePending(false); }
+  };
+
+  const runNeptune = async () => {
+    setNeptunePending(true);
+    try { await api("/api/neptune/runs", { method: "POST" }); await loadNeptune(); notify("info", "Neptune backup accepted."); }
+    catch (error) { notify("error", error instanceof Error ? error.message : "Neptune backup could not start."); }
+    finally { setNeptunePending(false); }
+  };
+
+  const checkNeptune = async () => {
+    setNeptunePending(true);
+    try { setNeptuneRelease(await api<ReleaseCheck>("/api/neptune/update/check", { method: "POST" })); }
+    catch (error) { notify("error", error instanceof Error ? error.message : "Neptune release check failed."); }
+    finally { setNeptunePending(false); }
+  };
+
+  const installNeptune = async () => {
+    const version = neptuneRelease?.available_version;
+    if (!version) return;
+    setNeptunePending(true);
+    try {
+      await api("/api/neptune/update/install", { method: "POST", body: JSON.stringify({ version }) });
+      setNeptuneRelease(null);
+      await loadNeptune();
+      notify("success", `Neptune ${version} installed.`);
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune update failed."); }
+    finally { setNeptunePending(false); }
+  };
+
+  const openGryphonConnection = async () => {
+    setGryphonPending(true);
+    try {
+      const result = await api<{ bots: GryphonBot[] }>("/api/gryphon/bots");
+      setGryphonBots(result.bots);
+      setGryphonBotId(result.bots.find((bot) => bot.state === "ready")?.id ?? "");
+      setGryphonConnectionOpen(true);
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Gryphon bot list could not be loaded."); }
+    finally { setGryphonPending(false); }
+  };
+
+  const connectGryphon = async () => {
+    if (!gryphonBotId) return;
+    setGryphonPending(true);
+    try {
+      await api("/api/gryphon/connection", { method: "PUT", body: JSON.stringify({ botId: gryphonBotId }) });
+      setGryphonConnectionOpen(false); await loadGryphon(); notify("success", "Chronos function linked to Gryphon.");
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Chronos function could not be linked."); }
+    finally { setGryphonPending(false); }
+  };
+
+  const disconnectGryphon = async () => {
+    setGryphonPending(true);
+    try {
+      await api("/api/gryphon/connection", { method: "DELETE" });
+      await loadGryphon(); notify("success", "Chronos function unlinked from Gryphon.");
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Chronos function could not be unlinked."); }
+    finally { setGryphonPending(false); }
+  };
+
+  const checkGryphon = async () => {
+    setGryphonPending(true);
+    try {
+      const result = await api<ReleaseCheck>("/api/gryphon/update/check", { method: "POST" });
+      setGryphonRelease(result);
+      notify("success", result.update_available ? `Gryphon ${result.available_version} is available.` : "Gryphon is up to date.");
+    }
+    catch (error) { notify("error", error instanceof Error ? error.message : "Gryphon release check failed."); }
+    finally { setGryphonPending(false); }
+  };
+
+  const installGryphon = async () => {
+    const version = gryphonRelease?.available_version;
+    if (!version) return;
+    setGryphonPending(true);
+    try {
+      await api("/api/gryphon/update/install", { method: "POST", body: JSON.stringify({ version }) });
+      setGryphonRelease(null); await loadGryphon(); notify("success", `Gryphon ${version} installed.`);
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Gryphon update failed."); }
+    finally { setGryphonPending(false); }
+  };
+
   const checkUpdate = async () => {
     setUpdatePending(true); setRelease(null);
     try {
@@ -327,6 +439,16 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     }
   };
 
+  const refreshUpdaterVersion = async () => {
+    try {
+      const status = await api<UpdateStatus>("/api/updates/status");
+      setUpdates(status);
+      notify("info", "Updater version status refreshed.");
+    } catch (error) {
+      notify("error", error instanceof Error ? error.message : "Updater status could not be refreshed.");
+    }
+  };
+
   if (!data || !values) return <LoadingBlock label="Loading Chronos settings..." />;
 
   const order = validOrder(values.settings_order);
@@ -344,7 +466,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     setDragged(null); setDrop(null);
     void commit({ settings_order: next }, "Settings section order saved.");
   };
-  const cardProps = (key: SettingsKey) => ({
+  const cardProps = (key: SettingsKey, extraClass = "") => ({
     ordinal: order.indexOf(key) + 1,
     span: "4x" as const,
     reorderLabel: `${key} settings`,
@@ -356,10 +478,9 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     },
     onDrop: (event: React.DragEvent<HTMLElement>) => { event.preventDefault(); dropSection(); },
     onMove: (direction: -1 | 1) => move(key, direction),
-    className: `${dragged === key ? "is-dragging" : ""} ${drop?.key === key ? (drop.after ? "drop-after" : "drop-before") : ""}`,
+    className: `${dragged === key ? "is-dragging" : ""} ${drop?.key === key ? (drop.after ? "drop-after" : "drop-before") : ""} ${extraClass}`,
   });
 
-  const remainingSeconds = linkCode ? Math.max(0, Math.ceil((Date.parse(linkCode.expiresAt) - clock) / 1000)) : 0;
   const sections: Record<SettingsKey, React.ReactNode> = {
     appearance: <UniversalCard title="Appearance" {...cardProps("appearance")}>
       <div className="settings-groups">
@@ -390,19 +511,26 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         </section>
       </div>
     </UniversalCard>,
-    backup: <UniversalCard title="Backup" {...cardProps("backup")}>
-      <div className="settings-groups">
-        <section className="settings-group"><h3>System snapshot</h3><p>Logical snapshots contain sessions, presentation and Telegram owner binding, but no Access Key or service tokens.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
+    backup: <UniversalCard title="Backup" {...cardProps("backup", "settings-backup-card")}>
+      <div className="settings-groups backup-content">
+        <section className="settings-group"><h3>System snapshot</h3><p>Logical snapshots contain sessions and presentation settings, but no Access Key or service tokens.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
         <section className="settings-group"><h3>Restore snapshot</h3><p>Validation completes before replacement begins. A pre-restore transaction protects the current timeline.</p><button type="button" className="settings-action" onClick={() => setRestoreOpen(true)} data-smart-hover>Browse local snapshot archive</button></section>
+        <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Neptune exports the same ZIP as the manual action and uploads it without changing its bytes.</p><div className="service-status-row backup-neptune-status" title={neptuneError || undefined}><span>Local Neptune agent:</span><span className={neptune ? "status-success" : "status-error"}>{neptune ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={neptune ? "success" : "danger"} /></div><div className="backup-schedule-controls"><div className="backup-schedule-fields"><label className="toggle-control"><input type="checkbox" checked={neptune?.project.enabled ?? false} disabled={!neptune || neptunePending} onChange={(event) => void saveNeptune(event.target.checked)} /><span>Enable automatic backups</span></label><label className="backup-interval-row"><span>Interval in hours:</span><input type="number" min={1} max={8760} value={neptuneInterval} disabled={!neptune || neptunePending} onChange={(event) => setNeptuneInterval(Number(event.target.value))} onBlur={() => { if (neptune) void saveNeptune(neptune.project.enabled); }} /></label></div><button type="button" className="settings-action backup-run-action" disabled={!neptune || neptune.active || neptunePending} onClick={() => void runNeptune()} data-smart-hover>Back up to Saturn now</button></div></section>
+        <section className="settings-group backup-version-group"><h3>Neptune version</h3><p>Current installed version: {neptune?.version ?? "unavailable"}{neptuneRelease?.available_version ? ` · latest ${neptuneRelease.available_version}` : ""}</p><button type="button" className="settings-action" disabled={!neptune || neptunePending} onClick={() => void checkNeptune()} data-smart-hover>Check Neptune for updates</button>{neptuneRelease?.update_available && <button type="button" className="settings-action" disabled={neptunePending} onClick={() => void installNeptune()} data-smart-hover>{neptunePending ? "Installing…" : `Install Neptune ${neptuneRelease.available_version}`}</button>}</section>
       </div>
     </UniversalCard>,
-    updates: <UniversalCard title="Updates" {...cardProps("updates")}>
-      <div className="settings-groups"><div className="settings-group"><h3>Update pipeline</h3><p>Release discovery comes from Kernel Register; replacement and rollback are performed by the local Updater.</p><p>Current installed version: <strong className="accent-text">{updates?.installed_version ?? data.runtime.version}</strong></p>
-        <div className="service-status-row"><span>Local updater agent</span><span className={updates?.updater.available ? "status-success" : "status-error"}>{updates?.updater.available ? "Service reachable" : "Unavailable"}</span><StatusSquare state={updates?.updater.available ? "success" : "danger"} /></div>
-        <div className="service-status-row"><span>Kernel Register</span><span className={data.runtime.register_revision ? "status-success" : "status-error"}>{data.runtime.register_revision ? "Service reachable" : "Unavailable"}</span><StatusSquare state={data.runtime.register_revision ? "success" : "danger"} /></div>
+    gryphon: <UniversalCard title="Bot connection" {...cardProps("gryphon", "settings-bot-card")}>
+      <div className="settings-groups bot-connection-groups">
+        <section className="settings-group"><h3>Gryphon bot binding</h3><p>Gryphon owns the Telegram connection, service receives only service-scoped commands.</p><div className="service-status-row bot-connection-status"><span>Local Gryphon agent:</span><span className={gryphon ? "status-success" : "status-error"}>{gryphon ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={gryphon ? "success" : "danger"} /></div>{gryphon?.connected && gryphon.bot ? <p className="bot-connection-selected">Connected bot: <strong>{gryphon.bot.username ? `@${gryphon.bot.username}` : gryphon.bot.alias}</strong></p> : null}<button type="button" className="settings-action bot-connection-action" disabled={!gryphon || gryphonPending} onClick={() => void (gryphon?.connected ? disconnectGryphon() : openGryphonConnection())} data-smart-hover>{gryphonPending ? "Working…" : gryphon?.connected ? "Unlink Chronos function" : "Link Chronos function"}</button>{!gryphon && gryphonError ? <p className="inline-error">{gryphonError}</p> : null}</section>
+        <section className="settings-group"><h3>Gryphon version</h3><p>Current installed version: <strong>{gryphon?.version ?? "unavailable"}</strong>{gryphonRelease?.available_version ? ` · latest ${gryphonRelease.available_version}` : ""}</p><button type="button" className="settings-action" disabled={!gryphon || gryphonPending} onClick={() => void checkGryphon()} data-smart-hover>Check Gryphon for updates</button>{gryphonRelease?.update_available && <button type="button" className="settings-action" disabled={gryphonPending} onClick={() => void installGryphon()} data-smart-hover>{gryphonPending ? "Installing…" : `Install Gryphon ${gryphonRelease.available_version}`}</button>}</section>
+      </div>
+    </UniversalCard>,
+    updates: <UniversalCard title="Updates" {...cardProps("updates", "settings-updates-card")}>
+      <div className="settings-groups updates-content"><div className="settings-group update-pipeline-group"><h3>Update pipeline</h3><p>Release discovery comes from Kernel Register; replacement and rollback are performed by the local Updater.</p><p>Current installed version: <strong className="accent-text">v{updates?.installed_version ?? data.runtime.version}</strong></p>
+        <div className="service-status-row"><span>Local Updater agent:</span><span className={updates?.updater.available ? "status-success" : "status-error"}>{updates?.updater.available ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={updates?.updater.available ? "success" : "danger"} /></div>
+        <div className="service-status-row"><span>Kernel Register:</span><span className={data.runtime.register_revision ? "status-success" : "status-error"}>{data.runtime.register_revision ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={data.runtime.register_revision ? "success" : "danger"} /></div>
         <button type="button" className="settings-action" disabled={!data.runtime.repository_url} onClick={openUpdate} data-smart-hover>Check for updates</button>
-        {!data.runtime.repository_url && <p className="form-hint">Release discovery is disabled because no approved repository is configured.</p>}
-      </div></div>
+      </div><div className="settings-group updater-version-group"><h3>Updater version</h3><p>Current installed version: {updates?.updater.version ?? "unavailable"}</p><button type="button" className="settings-action" disabled={updatePending} onClick={() => void refreshUpdaterVersion()} data-smart-hover>Check Updater for updates</button></div></div>
     </UniversalCard>,
     logs: <UniversalCard title="Logs" {...cardProps("logs")}>
       <div className="logs-command"><p>Compact bounded action stream. The newest 200 visible events are retained in this view.</p><button type="button" onClick={async () => { try { const name = await downloadFile("/api/logs/download"); notify("success", `${name} downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Logs could not be downloaded."); } }} data-smart-hover>Download archived logs</button></div>
@@ -417,14 +545,8 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         <label><span>Date format</span><select value={values.date_format} onChange={(event) => void commit({ date_format: event.target.value as SettingsValues["date_format"] })}><option value="DD.MM.YYYY">DD.MM.YYYY</option><option value="YYYY-MM-DD">YYYY-MM-DD</option><option value="MM/DD/YYYY">MM/DD/YYYY</option></select></label>
         <label><span>Long timer reminder, minutes</span><input type="number" min={0} max={10080} value={values.reminder_minutes} onChange={(event) => setValues({ ...values, reminder_minutes: Number(event.target.value) })} onBlur={() => data.values.reminder_minutes !== values.reminder_minutes && void commit({ reminder_minutes: values.reminder_minutes })} /></label>
         <label><span>Daily summary time</span><input type="time" value={values.daily_summary_time} disabled={!values.daily_summary_enabled} onChange={(event) => setValues({ ...values, daily_summary_time: event.target.value })} onBlur={() => data.values.daily_summary_time !== values.daily_summary_time && void commit({ daily_summary_time: values.daily_summary_time })} /></label>
-        <label className="toggle-control"><input type="checkbox" checked={values.daily_summary_enabled} onChange={(event) => void commit({ daily_summary_enabled: event.target.checked })} /><span>Send the daily balance through Telegram</span></label>
+        <label className="toggle-control"><input type="checkbox" checked={values.daily_summary_enabled} onChange={(event) => void commit({ daily_summary_enabled: event.target.checked })} /><span>Send the daily balance through Gryphon</span></label>
       </div>
-    </UniversalCard>,
-    telegram: <UniversalCard title="Telegram" {...cardProps("telegram")}>
-      <p className="section-description">The private bot accepts commands only from the linked owner account.</p>
-      <div className="telegram-status-grid"><div><span>Configuration</span><strong>{data.telegram.configured ? "Available" : "Missing"}</strong></div><div><span>Receiver</span><strong>{data.telegram.running ? "Running" : "Stopped"}</strong></div><div><span>Owner</span><strong>{data.telegram.linked ? "Linked" : "Not linked"}</strong></div><div><span>Bot identity</span><strong>{data.telegram.username ? `@${data.telegram.username}` : "Unknown"}</strong></div></div>
-      {data.telegram.last_error && <p className="inline-error">{data.telegram.last_error}</p>}
-      {!data.telegram.linked ? <div className="link-block"><button type="button" disabled={!data.telegram.running} onClick={() => void createLinkCode()} data-smart-hover>Create link code</button>{linkCode && <div className="link-code"><span>Send this exact command to the bot</span><strong>/link {linkCode.code}</strong><span>Single use · expires in {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, "0")}</span></div>}</div> : <button type="button" className="danger-button settings-action" onClick={() => setUnlinkOpen(true)} data-smart-hover>Unlink Telegram</button>}
     </UniversalCard>,
   };
 
@@ -436,10 +558,11 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
 
     {kernelTokenOpen && <Overlay title="Rotate Kernel access token" onClose={() => { setKernelTokenOpen(false); setKernelTokens({ next: "", repeat: "" }); }} dismissible={!kernelTokens.next && !kernelTokens.repeat && !kernelTokenPending}><form className="form-grid" onSubmit={rotateKernelToken}><p className="form-hint">The replacement is write-only and will be tested against <strong>{kernelUrl}</strong> before the current connection changes.</p><label><span>New Kernel token</span><input type="password" minLength={24} autoComplete="new-password" value={kernelTokens.next} onChange={(event) => setKernelTokens({ ...kernelTokens, next: event.target.value })} /></label><label><span>Repeat new Kernel token</span><input type="password" minLength={24} autoComplete="new-password" value={kernelTokens.repeat} onChange={(event) => setKernelTokens({ ...kernelTokens, repeat: event.target.value })} /></label><div className="form-actions"><button type="button" disabled={kernelTokenPending} onClick={() => { setKernelTokenOpen(false); setKernelTokens({ next: "", repeat: "" }); }} data-smart-hover>Cancel</button><SubmitButton pending={kernelTokenPending} label="Validate and rotate" pendingLabel="Validating..." /></div></form></Overlay>}
 
+    {gryphonConnectionOpen && <Overlay title="Link Chronos function" onClose={() => setGryphonConnectionOpen(false)} dismissible={!gryphonPending}><div className="bot-picker"><p className="form-hint">Select a Telegram bot already connected through the Gryphon CLI.</p><div className="bot-picker-list">{gryphonBots.length ? gryphonBots.map((bot) => <label key={bot.id} className={bot.state === "ready" ? "" : "is-disabled"}><input type="radio" name="chronos-gryphon-bot" value={bot.id} checked={gryphonBotId === bot.id} disabled={bot.state !== "ready" || gryphonPending} onChange={() => setGryphonBotId(bot.id)} /><span><strong>{bot.username ? `@${bot.username}` : bot.alias}</strong><small>{bot.alias} · {bot.state}</small></span></label>) : <p>No bots are connected. Add one with <code>gryphon bot connect</code>.</p>}</div><div className="form-actions"><button type="button" disabled={gryphonPending} onClick={() => setGryphonConnectionOpen(false)} data-smart-hover>Cancel</button><button type="button" disabled={!gryphonBotId || gryphonPending} onClick={() => void connectGryphon()} data-smart-hover>{gryphonPending ? "Linking…" : "Link function"}</button></div></div></Overlay>}
+
     {restoreOpen && <Overlay title="Restore Chronos snapshot" onClose={closeRestore} dismissible={!restoreFile && !restorePending}><div className="restore-flow"><input ref={fileRef} className="visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectRestore(file); }} /><button type="button" disabled={restorePending} onClick={() => fileRef.current?.click()} data-smart-hover>Select native archive</button>{restoreFile && <div className="archive-metadata"><span>File</span><strong>{restoreFile.name.replace(/[\\/\u0000-\u001f]/g, "_")}</strong><span>Size</span><strong>{(restoreFile.size / 1024).toFixed(1)} KiB</strong>{inspection && <><span>Schema</span><strong>{inspection.schema}</strong><span>Created</span><strong>{inspection.created_at ? localDate(inspection.created_at, values) : "Unknown"}</strong><span>Sessions</span><strong>{inspection.session_count}</strong><span>Mode</span><strong>Replace current Chronos state</strong></>}</div>}{restoreFile && !inspection && !restoreError && <p className="form-hint">Validating archive structure and checksum…</p>}{restoreError && <p className="inline-error" role="alert">{restoreError}</p>}<div className="form-actions"><button type="button" disabled={restorePending} onClick={closeRestore} data-smart-hover>Cancel</button><button type="button" className="danger-button" disabled={!inspection || restorePending} onClick={() => void restore()} data-smart-hover>{restorePending ? "Restoring..." : "Restore and replace"}</button></div></div></Overlay>}
 
     {updateOpen && <Overlay title="Chronos update discovery" onClose={() => setUpdateOpen(false)} dismissible={!updatePending}><div className="update-flow"><div className="service-status-row"><span>Installed version</span><strong>{updates?.installed_version ?? data.runtime.version}</strong></div><div className="service-status-row"><span>Approved registry</span><strong>{data.runtime.register_revision ?? "Offline / no last-known revision"}</strong></div><div className="service-status-row"><span>Local updater</span><strong>{updates?.updater.available ? "Available" : "Unavailable"}</strong></div>{updatePending && <p className="form-hint">Checking and verifying the approved release source…</p>}{release && <div className="release-result"><strong>{release.update_available ? `Verified release ${release.available_version} is available` : "Installed release is up to date"}</strong>{release.published_at && <span>Published {localDate(release.published_at, values)}</span>}{release.release_url && <a href={release.release_url} target="_blank" rel="noreferrer">Open release notes</a>}</div>}{job && <pre className="job-state">{JSON.stringify(job, null, 2)}</pre>}<div className="form-actions"><button type="button" disabled={updatePending} onClick={() => setUpdateOpen(false)} data-smart-hover>Close</button><button type="button" disabled={updatePending} onClick={() => void checkUpdate()} data-smart-hover>Check again</button>{release?.update_available && <button type="button" disabled={updatePending || !updates?.updater.available} onClick={() => void applyUpdate()} data-smart-hover>Update to {release.available_version}</button>}</div></div></Overlay>}
 
-    {unlinkOpen && <ConfirmOverlay title="Unlink Telegram" description={<><p>Revoke the linked Telegram identity from this Chronos instance?</p><p>The bot remains installed, but commands will be denied until a new owner is linked.</p></>} confirmLabel="Unlink Telegram" pendingLabel="Unlinking..." onConfirm={unlinkTelegram} onClose={() => setUnlinkOpen(false)} />}
   </>;
 }

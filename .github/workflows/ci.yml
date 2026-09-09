@@ -1,0 +1,88 @@
+name: Chronos CI
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chronos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: chronos_test
+          POSTGRES_USER: chronos
+          POSTGRES_PASSWORD: test-database-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chronos -d chronos_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.9.0"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: API, security and backup/update verification
+        env:
+          TEST_DATABASE_URL: postgresql://chronos:test-database-password@127.0.0.1:5432/chronos_test
+        run: |
+          sh -n bootstrap.sh install.sh
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pip check
+          PYTHONPATH=. pytest
+      - name: Web and Documentation verification
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm build
+          pnpm audit --prod --audit-level high
+
+  pre-push-gate:
+    name: Pre-push gate
+    needs: verify
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Evaluate seven-area contract gate
+        env:
+          GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: >-
+          python3 scripts/pre-push-gate.py
+          --upstream-result "${{ needs.verify.result }}"
+          --report .pre-push-gate-report.json
+      - name: Preserve gate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: chronos-pre-push-gate-${{ github.sha }}
+          path: .pre-push-gate-report.json
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "service": "chronos",
+  "exposure_modes": [
+    "public/non-indexable",
+    "private"
+  ],
+  "profiles": {
+    "backup_restore": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "tests/test_api.py"
+      ]
+    },
+    "service_update": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "app/updater.py",
+        "tests/test_api.py"
+      ]
+    },
+    "internal_documentation": {
+      "applicable": true,
+      "evidence": [
+        "web/src/pages/Documentation.tsx",
+        "web/src/App.tsx",
+        "tests/test_api.py"
+      ]
+    },
+    "technical_documentation": {
+      "applicable": true,
+      "evidence": [
+        "README.md"
+      ]
+    },
+    "security": {
+      "applicable": true,
+      "evidence": [
+        "tests/test_security.py",
+        "tests/test_api.py"
+      ]
+    },
+    "public_seo_geo": {
+      "applicable": false,
+      "reason": "Chronos has no intentionally public/indexable content surface."
+    },
+    "private_concealed": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "tests/test_security.py"
+      ]
+    }
+  }
+}

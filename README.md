@@ -1,9 +1,13 @@
 # Chronos
 
+## Автоматические резервные копии
+
+После обычной установки создайте в Saturn одноразовый Neptune setup code и выполните `sudo chronos-install backup`. Команда сама устанавливает общий Linux-агент при его отсутствии, создаёт локальные секреты, регистрирует Chronos и перезапускает контейнер. Расписание включается в Settings Chronos.
+
 Chronos is a production-ready time tracking service for the Exocortex ecosystem.
 
 Chronos runs in three modes:
-- Telegram bot for quick timer start/stop.
+- Gryphon command adapter for quick timer start/stop through Telegram.
 - Web UI for full control and analytics.
 - Kernel + Updater integration for centralized domain and release management.
 
@@ -33,7 +37,7 @@ Chronos runs in three modes:
 
 - Backend: FastAPI + asyncpg + PostgreSQL
 - Frontend: React + Vite
-- Telegram: aiogram
+- Telegram transport and identity binding: external Gryphon gateway
 - Infrastructure: Docker Compose, GitHub Actions
 
 ## Layout
@@ -86,16 +90,18 @@ Nginx edits because only `/` serves the SPA shell.
 - `CHRONOS_DB_PASSWORD`
 - `UPDATER_CONTROL_TOKEN`
 - `UPDATER_SOCKET_GID`
+- `GRYPHON_SERVICE_TOKEN_HOST_FILE`
+- `GRYPHON_SOCKET_PATH`
 
 ## Kernel Register contract
 
-Chronos expects:
+Chronos expects every present Register value below to be a strict
+`volt://<entry-id>/<field-id>` reference:
 - `repositories.chronos.url` or `services.chronos.url`
 - `services.chronos.sni` (domain binding)
-- `services.chronos.telegram_api` or `services.chronos.telegram_bot_api`
-- `secrets.chronos.telegram_bot_token` from `secret://env/...`
 
-Values are refreshed by watcher loop and applied live.
+The watcher batch-resolves the relevant keys through Kernel and applies the
+returned values live without persisting them.
 
 ## Updater contract
 
@@ -118,14 +124,27 @@ Restore header: `X-Updater-Token`.
 - `GET /api/analytics/overview`
 - `GET /api/health`
 
-## Telegram behavior
+## Gryphon / Telegram behavior
 
-- Bot works independently from web session state.
+- Gryphon owns the bot token, webhook, update deduplication and the
+  service-scoped Telegram identity binding. Chronos contains no bot runtime.
 - Command flow: start/stop by category, quick summary, retype the last completed
-  session with `/retype`, and insert a completed recent session with `/backfill`.
-- Token priority:
-  1. `services.chronos.telegram_api` from Kernel Register
-  2. `CHRONOS_TELEGRAM_BOT_TOKEN` from `.env` (local fallback only)
+  session with `/chronos retype`, and insert a completed recent session with
+  `/chronos backfill MINUTES`.
+- Chronos exposes `POST /api/internal/gryphon/command`; the endpoint accepts
+  only the bearer token shared when the service connection is created.
+- Connect one or more bot tokens with `gryphon bot connect`, then use **Link
+  Chronos function** in the Bot connection Settings card to select one of those
+  bots. Chronos receives only its service credential and never sees a bot token.
+- Telegram-user authorization remains a separate CLI action:
+  `gryphon link issue chronos`, followed by the printed `/link CODE` in a private
+  chat with the selected bot. The Settings card also checks and installs verified
+  Gryphon Linux updates through the host Updater.
+- Reminders and daily summaries are sent through Gryphon's service-scoped Unix
+  socket.
+
+Chronos has no Volt URL or token. Kernel contacts Volt on Chronos' behalf and
+Chronos keeps the returned plaintext only in process memory.
 
 ## Roadmap
 

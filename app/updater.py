@@ -120,6 +120,36 @@ class UpdaterClient:
             self._request, "POST", "/v1/updates", body, True, 30
         )
 
+    async def update_neptune(self, version: str) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._request,
+            "POST",
+            "/v1/components/neptune-linux/update",
+            {"head_id": self.head_id, "version": version},
+            True,
+            300,
+        )
+
+    async def update_gryphon(self, version: str) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._request,
+            "POST",
+            "/v1/components/gryphon-linux/update",
+            {"head_id": self.head_id, "version": version},
+            True,
+            300,
+        )
+
+    async def check_gryphon(self, current_version: str) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._request,
+            "POST",
+            "/v1/components/gryphon-linux/check",
+            {"head_id": self.head_id, "current_version": current_version},
+            True,
+            30,
+        )
+
     async def job(self, job_id: str) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._request, "GET", f"/v1/jobs/{quote(job_id, safe='')}"
@@ -146,6 +176,7 @@ async def check_github_release(
     repository_url: str,
     current_version: str,
     timeout_seconds: float,
+    service: str = "chronos",
 ) -> dict[str, Any]:
     parsed = urlparse(repository_url)
     segments = [segment for segment in parsed.path.split("/") if segment]
@@ -159,7 +190,7 @@ async def check_github_release(
             f"https://api.github.com/repos/{quote(owner)}/{quote(repository)}/releases?per_page=100",
             headers={
                 "Accept": "application/vnd.github+json",
-                "User-Agent": "exocortex-chronos-updater",
+                "User-Agent": f"exocortex-{service}-updater",
                 "X-GitHub-Api-Version": "2026-03-10",
             },
         )
@@ -176,10 +207,10 @@ async def check_github_release(
         if (
             release.get("draft")
             or release.get("prerelease")
-            or not tag.lower().startswith("chronos-v")
+            or not tag.lower().startswith(f"{service.lower()}-v")
         ):
             continue
-        version = tag[len("chronos-v") :]
+        version = tag[len(service) + 2 :]
         parsed_version = _version_tuple(version)
         if parsed_version:
             candidates.append((parsed_version, release, version))
@@ -187,7 +218,7 @@ async def check_github_release(
     available = candidates[0] if candidates else None
     current = _version_tuple(current_version) or (0, 0, 0, "")
     return {
-        "service": "chronos",
+        "service": service,
         "repository_url": repository_url,
         "installed_version": current_version,
         "available_version": available[2] if available else None,

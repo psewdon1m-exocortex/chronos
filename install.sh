@@ -68,6 +68,58 @@ install_command() {
   chmod 0755 "$wrapper"
 }
 
+prepare_neptune_mounts() {
+  getent group neptune-clients >/dev/null 2>&1 || groupadd --system neptune-clients
+  neptune_gid=$(getent group neptune-clients | cut -d: -f3)
+  install -d -o root -g neptune-clients -m 0770 /run/neptune
+  install -d -o root -g neptune-clients -m 0750 /etc/neptune/clients
+  control_file=/etc/neptune/clients/chronos.control.token
+  export_file=/etc/neptune/clients/chronos.export.token
+  for token_file in "$control_file" "$export_file"; do
+    if [ ! -s "$token_file" ]; then
+      umask 0027
+      random_hex 32 >"$token_file"
+    fi
+    chown root:neptune-clients "$token_file"
+    chmod 0640 "$token_file"
+  done
+  set_env NEPTUNE_SOCKET_GID "$neptune_gid"
+  set_env NEPTUNE_CONTROL_TOKEN_HOST_FILE "$control_file"
+  set_env NEPTUNE_EXPORT_TOKEN_HOST_FILE "$export_file"
+}
+
+prepare_gryphon_mounts() {
+  getent group gryphon-clients >/dev/null 2>&1 || groupadd --system gryphon-clients
+  gryphon_gid=$(getent group gryphon-clients | cut -d: -f3)
+  install -d -o root -g gryphon-clients -m 0770 /run/gryphon
+  install -d -o root -g gryphon-clients -m 0750 /etc/gryphon/clients
+  token_file=/etc/gryphon/clients/chronos.token
+  if [ ! -s "$token_file" ]; then
+    umask 0027
+    random_hex 32 >"$token_file"
+  fi
+  chown root:gryphon-clients "$token_file"
+  chmod 0640 "$token_file"
+  set_env GRYPHON_CLIENTS_GID "$gryphon_gid"
+  set_env GRYPHON_SERVICE_TOKEN_HOST_FILE "$token_file"
+}
+
+enable_backup() {
+  require_root
+  [ -f "$ENV_FILE" ] || { echo "Install Chronos first." >&2; exit 2; }
+  command -v updater >/dev/null 2>&1 || { echo "Updater is required." >&2; exit 3; }
+  prepare_neptune_mounts
+  updater neptune install --head chronos
+  enrollment_code=${NEPTUNE_ENROLLMENT_CODE:-}
+  if [ -z "$enrollment_code" ]; then
+    printf 'Saturn one-time setup code: ' >&2
+    stty -echo; trap 'stty echo' EXIT HUP INT TERM; IFS= read -r enrollment_code; stty echo; trap - EXIT HUP INT TERM; printf '\n' >&2
+  fi
+  printf '%s\n' "$enrollment_code" | updater neptune enroll --head chronos --project chronos --export-url "http://127.0.0.1:$(get_env CHRONOS_LISTEN_PORT)/api/internal/neptune/backup"
+  unset enrollment_code
+  echo "Chronos automatic backup is connected. Enable its schedule in Settings."
+}
+
 prepare() {
   require_root
   command -v openssl >/dev/null 2>&1 || {
@@ -83,6 +135,8 @@ prepare() {
   [ -z "${CHRONOS_RELEASE_VERSION:-}" ] || set_env CHRONOS_VERSION "$CHRONOS_RELEASE_VERSION"
   [ -z "${CHRONOS_RELEASE_IMAGE:-}" ] || set_env CHRONOS_IMAGE "$CHRONOS_RELEASE_IMAGE"
   copy_local_kernel_bootstrap
+  prepare_neptune_mounts
+  prepare_gryphon_mounts
   install_command
   echo "Chronos files are prepared in $INSTALL_DIR"
   echo "Edit only the OPERATOR INPUT section in $ENV_FILE"
@@ -121,6 +175,9 @@ validate_install() {
 install_chronos() {
   require_root
   validate_install
+  prepare_neptune_mounts
+  prepare_gryphon_mounts
+  docker network inspect exocortex-services >/dev/null 2>&1 || docker network create exocortex-services >/dev/null
   cd "$INSTALL_DIR"
   "$INSTALL_DIR/updater/install.sh" chronos "$ENV_FILE" "$INSTALL_DIR/updater/updater-linux-amd64"
   docker compose --env-file "$ENV_FILE" -f compose.production.yaml config -q
@@ -149,5 +206,6 @@ case "$ACTION" in
     cd "$INSTALL_DIR"
     docker compose --env-file "$ENV_FILE" -f compose.production.yaml ps
   ;;
-  *) echo "Usage: chronos-install [install|prepare|status]" >&2; exit 2 ;;
+  backup) enable_backup ;;
+  *) echo "Usage: chronos-install [install|prepare|status|backup]" >&2; exit 2 ;;
 esac

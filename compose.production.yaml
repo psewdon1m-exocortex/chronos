@@ -31,6 +31,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - default
+      - exocortex-services
     ports:
       - "127.0.0.1:${CHRONOS_LISTEN_PORT:-18280}:${CHRONOS_LISTEN_PORT:-18280}"
     environment:
@@ -41,7 +44,6 @@ services:
       CHRONOS_SESSION_SECRET: "${CHRONOS_SESSION_SECRET:?Set CHRONOS_SESSION_SECRET in .env}"
       CHRONOS_COOKIE_SECURE: "${CHRONOS_COOKIE_SECURE:-true}"
       CHRONOS_TRUST_PROXY: "${CHRONOS_TRUST_PROXY:-true}"
-      CHRONOS_TELEGRAM_BOT_TOKEN: "${CHRONOS_TELEGRAM_BOT_TOKEN:-}"
       CHRONOS_REPOSITORY_URL: "${CHRONOS_REPOSITORY_URL:-}"
       CHRONOS_PUBLIC_URL: "${CHRONOS_PUBLIC_URL:-}"
       DATABASE_URL: "postgresql://chronos:${CHRONOS_DB_PASSWORD:?Set CHRONOS_DB_PASSWORD in .env}@db:5432/chronos"
@@ -55,6 +57,14 @@ services:
       CHRONOS_AUDIT_RETENTION_DAYS: "${CHRONOS_AUDIT_RETENTION_DAYS:-30}"
       CHRONOS_UPDATE_CHECK_TIMEOUT_SEC: "${CHRONOS_UPDATE_CHECK_TIMEOUT_SEC:-5}"
       UPDATER_SOCKET_PATH: /run/exocortex/updater.sock
+      NEPTUNE_SOCKET_PATH: /run/neptune/neptuned.sock
+      NEPTUNE_PROJECT_ID: "${NEPTUNE_PROJECT_ID:-chronos}"
+      NEPTUNE_CONTROL_TOKEN_FILE: /run/secrets/neptune/control.token
+      NEPTUNE_EXPORT_TOKEN_FILE: /run/secrets/neptune/export.token
+      GRYPHON_SERVICE_TOKEN_FILE: /run/secrets/gryphon/chronos.token
+      GRYPHON_SOCKET_PATH: /run/gryphon/client.sock
+      GRYPHON_ADAPTER_URL: "${GRYPHON_ADAPTER_URL:-http://chronos:18280/api/internal/gryphon/command}"
+      GRYPHON_TIMEOUT_SEC: "${GRYPHON_TIMEOUT_SEC:-5}"
       UPDATER_HEAD_ID: "${UPDATER_HEAD_ID:-chronos}"
       UPDATER_CONTROL_TOKEN: "${UPDATER_CONTROL_TOKEN:?Set UPDATER_CONTROL_TOKEN in .env}"
     volumes:
@@ -62,8 +72,28 @@ services:
       - type: bind
         source: "${UPDATER_SOCKET_DIR:-/run/exocortex}"
         target: /run/exocortex
+      - type: bind
+        source: "${NEPTUNE_SOCKET_DIR:-/run/neptune}"
+        target: /run/neptune
+      - type: bind
+        source: "${NEPTUNE_CONTROL_TOKEN_HOST_FILE:?Set NEPTUNE_CONTROL_TOKEN_HOST_FILE in .env}"
+        target: /run/secrets/neptune/control.token
+        read_only: true
+      - type: bind
+        source: "${NEPTUNE_EXPORT_TOKEN_HOST_FILE:?Set NEPTUNE_EXPORT_TOKEN_HOST_FILE in .env}"
+        target: /run/secrets/neptune/export.token
+        read_only: true
+      - type: bind
+        source: "${GRYPHON_SERVICE_TOKEN_HOST_FILE:?Set GRYPHON_SERVICE_TOKEN_HOST_FILE in .env}"
+        target: /run/secrets/gryphon/chronos.token
+        read_only: true
+      - type: bind
+        source: "${GRYPHON_SOCKET_DIR:-/run/gryphon}"
+        target: /run/gryphon
     group_add:
       - "${UPDATER_SOCKET_GID:?Set UPDATER_SOCKET_GID during VPS installation}"
+      - "${NEPTUNE_SOCKET_GID:?Set NEPTUNE_SOCKET_GID during Neptune installation}"
+      - "${GRYPHON_CLIENTS_GID:?Set GRYPHON_CLIENTS_GID during installation}"
     read_only: true
     tmpfs:
       - /tmp:size=32m,noexec,nosuid,nodev
@@ -82,3 +112,7 @@ services:
 volumes:
   chronos-db:
   chronos-data:
+
+networks:
+  exocortex-services:
+    external: true

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import hashlib
+from datetime import datetime, timezone
 import json
 from typing import Any, Iterable
 
@@ -63,7 +62,7 @@ class Store:
                 owner = await connection.fetchrow("select id from users order by id limit 1")
                 if owner is None:
                     await connection.execute(
-                        "insert into users (tg_user_id) values (0)"
+                        "insert into users default values"
                     )
                 security = await connection.fetchval(
                     "select 1 from operator_security where id = 1"
@@ -102,7 +101,7 @@ class Store:
     async def owner(self, connection: asyncpg.Connection | None = None) -> asyncpg.Record:
         if connection is not None:
             row = await connection.fetchrow(
-                "select id, tg_user_id, created_at from users order by id limit 1"
+                "select id, created_at from users order by id limit 1"
             )
             if row is None:
                 raise RuntimeError("Chronos owner is not initialized")
@@ -201,74 +200,74 @@ class Store:
                     )
         return await self.settings()
 
-    async def create_link_code(self, code: str, lifetime_minutes: int = 10) -> datetime:
-        digest = hashlib.sha256(code.encode("ascii")).hexdigest()
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes)
+    async def begin_gryphon_event(self, event_id: str) -> dict[str, Any] | None:
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                await connection.execute(
-                    "delete from telegram_link_codes where consumed_at is null"
-                )
-                await connection.execute(
+                inserted = await connection.fetchval(
                     """
-                    insert into telegram_link_codes (code_hash, expires_at)
-                    values ($1, $2)
+                    insert into gryphon_events (event_id, state)
+                    values ($1, 'processing')
+                    on conflict do nothing
+                    returning event_id
                     """,
-                    digest,
-                    expires_at,
+                    event_id,
                 )
-        return expires_at
-
-    async def consume_link_code(self, code: str, tg_user_id: int) -> bool:
-        digest = hashlib.sha256(code.upper().encode("ascii")).hexdigest()
-        async with self.pool.acquire() as connection:
-            async with connection.transaction():
-                linked = await connection.fetchrow(
+                if inserted:
+                    return None
+                existing = await connection.fetchrow(
+                    "select state, response from gryphon_events where event_id = $1 for update",
+                    event_id,
+                )
+                if existing and existing["state"] == "completed":
+                    return _json_value(existing["response"])
+                if existing and existing["state"] == "failed":
+                    await connection.execute(
+                        """
+                        update gryphon_events
+                        set state = 'processing', response = null,
+                            started_at = now(), completed_at = null
+                        where event_id = $1
+                        """,
+                        event_id,
+                    )
+                    return None
+                recovered = await connection.fetchval(
                     """
-                    select id from telegram_link_codes
-                    where code_hash = $1 and consumed_at is null and expires_at > now()
-                    order by created_at desc
-                    limit 1
-                    for update
+                    update gryphon_events
+                    set started_at = now()
+                    where event_id = $1 and state = 'processing'
+                      and started_at < now() - interval '5 minutes'
+                    returning event_id
                     """,
-                    digest,
+                    event_id,
                 )
-                if linked is None:
-                    return False
-                owner = await self.owner(connection)
-                conflict = await connection.fetchval(
-                    "select 1 from users where tg_user_id = $1 and id <> $2",
-                    tg_user_id,
-                    owner["id"],
-                )
-                if conflict:
-                    return False
-                await connection.execute(
-                    "update users set tg_user_id = $1 where id = $2",
-                    tg_user_id,
-                    owner["id"],
-                )
-                await connection.execute(
-                    "update telegram_link_codes set consumed_at = now() where id = $1",
-                    linked["id"],
-                )
-                return True
+                if recovered:
+                    return None
+                raise RuntimeError("Gryphon event is already being processed")
 
-    async def unlink_telegram(self) -> None:
+    async def complete_gryphon_event(
+        self, event_id: str, response: dict[str, Any]
+    ) -> None:
         async with self.pool.acquire() as connection:
-            owner = await self.owner(connection)
             await connection.execute(
-                "update users set tg_user_id = 0 where id = $1", owner["id"]
+                """
+                update gryphon_events
+                set state = 'completed', response = $2::jsonb, completed_at = now()
+                where event_id = $1 and state = 'processing'
+                """,
+                event_id,
+                json.dumps(response),
             )
 
-    async def telegram_owner_id(self) -> int | None:
-        owner = await self.owner()
-        value = int(owner["tg_user_id"])
-        return value if value > 0 else None
-
-    async def is_telegram_owner(self, tg_user_id: int) -> bool:
-        owner = await self.telegram_owner_id()
-        return owner is not None and owner == tg_user_id
+    async def fail_gryphon_event(self, event_id: str) -> None:
+        async with self.pool.acquire() as connection:
+            await connection.execute(
+                """
+                update gryphon_events set state = 'failed', completed_at = now()
+                where event_id = $1 and state = 'processing'
+                """,
+                event_id,
+            )
 
     async def audit(
         self,
@@ -372,7 +371,6 @@ class Store:
         return {
             "schema": "exocortex.chronos.backup.v1",
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "owner": {"telegram_user_id": int(owner["tg_user_id"])},
             "settings": settings,
             "sessions": [serialize_session(row) for row in rows],
         }
@@ -382,7 +380,6 @@ class Store:
             raise ValueError("Unsupported Chronos backup schema")
         sessions = backup.get("sessions")
         settings = backup.get("settings")
-        owner_data = backup.get("owner")
         if not isinstance(sessions, list) or not isinstance(settings, dict):
             raise ValueError("Chronos backup is incomplete")
         if len(sessions) > 1_000_000:
@@ -433,17 +430,6 @@ class Store:
                         key,
                         json.dumps(value),
                     )
-                telegram_id = 0
-                if isinstance(owner_data, dict):
-                    try:
-                        telegram_id = max(0, int(owner_data.get("telegram_user_id", 0)))
-                    except (TypeError, ValueError):
-                        telegram_id = 0
-                await connection.execute(
-                    "update users set tg_user_id = $1 where id = $2",
-                    telegram_id,
-                    owner["id"],
-                )
         return len(sessions)
 
     async def sessions_for_export(self) -> Iterable[asyncpg.Record]:

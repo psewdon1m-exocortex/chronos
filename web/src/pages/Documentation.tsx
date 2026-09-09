@@ -66,9 +66,9 @@ const SECTIONS = [
     title: "Telegram",
     content: (
       <>
-        <p>Chronos is private. Generate a one-time code in Settings and send <code>/link CODE</code> to the configured bot. After linking, every other Telegram account is rejected.</p>
+        <p>Telegram transport and identity binding are owned by Gryphon. After the host CLI connects one or more bots, <strong>Link Chronos function</strong> in Settings selects one from that Gryphon-owned pool. Telegram-user authorization remains the separate <code>gryphon link issue chronos</code> CLI flow. The same card manages verified Gryphon Linux updates through Updater.</p>
         <h3>Commands</h3>
-        <pre><code>{`/status    active timer\n/stats     today\n/week      current week\n/month     current month\n/stop      stop active timer\n/undo      undo last timer action\n/retype    change the last completed session category\n/backfill  insert a completed session for the last N minutes`}</code></pre>
+        <pre><code>{`/chronos status              active timer\n/chronos stats               today\n/chronos week                current week\n/chronos month               current month\n/chronos stop                stop active timer\n/chronos undo                undo last timer action\n/chronos retype              change the last completed session category\n/chronos backfill MINUTES    insert a completed session for the last N minutes`}</code></pre>
         <p>Retyping offers the four fixed category buttons. Backfill asks for whole minutes, then a category. It inserts a completed session, trims or removes overlapped entries, and preserves any active timer with the overlapped time deducted.</p>
         <p>Long-timer reminders and the daily summary follow the timezone and schedule configured in Settings.</p>
       </>
@@ -80,8 +80,8 @@ const SECTIONS = [
     title: "Data, backup and updates",
     content: (
       <>
-        <p>PostgreSQL is the authoritative store, including card and navigation order. A backup contains sessions, personalization and the Telegram owner binding; it never includes the Access Key or service tokens.</p>
-        <p>Kernel Register supplies the repository, public domain and Telegram API value with a validated last-known-good cache. The local Updater creates another backup before replacing the immutable Chronos image and can restore it after rollback.</p>
+        <p>PostgreSQL is the authoritative store for Chronos sessions, card order and navigation order. Gryphon independently owns Telegram bindings. A Chronos backup never includes the Access Key or service tokens.</p>
+        <p>Kernel Register supplies the repository and public domain with a validated last-known-good cache. The local Updater creates another backup before replacing the immutable Chronos image and can restore it after rollback.</p>
       </>
     ),
     search: "postgresql backup restore kernel register updater release rollback security",

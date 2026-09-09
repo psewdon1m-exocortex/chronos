@@ -39,7 +39,6 @@ class RuntimeConfig:
     kernel_refresh_seconds: int
     repository_url: str
     public_url: str
-    telegram_token: str
     register_revision: str
     updater_socket_path: str
     updater_head_id: str
@@ -47,13 +46,20 @@ class RuntimeConfig:
     update_check_timeout_seconds: float
     audit_max_entries: int
     audit_retention_days: int
+    neptune_socket_path: str
+    neptune_project_id: str
+    neptune_control_token_file: Path
+    neptune_export_token_file: Path
+    gryphon_service_token_file: Path
+    gryphon_socket_path: str
+    gryphon_adapter_url: str
+    gryphon_timeout_seconds: float
 
     def with_register(
         self,
         *,
         repository_url: str,
         public_url: str,
-        telegram_token: str,
         register_revision: str,
         kernel_refresh_seconds: int | None = None,
     ) -> "RuntimeConfig":
@@ -61,7 +67,6 @@ class RuntimeConfig:
             self,
             repository_url=repository_url,
             public_url=public_url,
-            telegram_token=telegram_token,
             register_revision=register_revision,
             kernel_refresh_seconds=kernel_refresh_seconds or self.kernel_refresh_seconds,
         )
@@ -113,7 +118,6 @@ def load_config() -> RuntimeConfig:
         kernel_refresh_seconds=_integer("KERNEL_REFRESH_SEC", 60, 5),
         repository_url=os.getenv("CHRONOS_REPOSITORY_URL", "").strip(),
         public_url=os.getenv("CHRONOS_PUBLIC_URL", "").strip(),
-        telegram_token=os.getenv("CHRONOS_TELEGRAM_BOT_TOKEN", "").strip(),
         register_revision="",
         updater_socket_path=os.getenv(
             "UPDATER_SOCKET_PATH", "/run/exocortex/updater.sock"
@@ -125,6 +129,22 @@ def load_config() -> RuntimeConfig:
         ),
         audit_max_entries=_integer("CHRONOS_AUDIT_MAX_ENTRIES", 10000),
         audit_retention_days=_integer("CHRONOS_AUDIT_RETENTION_DAYS", 30),
+        neptune_socket_path=os.getenv("NEPTUNE_SOCKET_PATH", "/run/neptune/neptuned.sock"),
+        neptune_project_id=os.getenv("NEPTUNE_PROJECT_ID", "chronos"),
+        neptune_control_token_file=Path(os.getenv("NEPTUNE_CONTROL_TOKEN_FILE", "/run/secrets/neptune/control.token")),
+        neptune_export_token_file=Path(os.getenv("NEPTUNE_EXPORT_TOKEN_FILE", "/run/secrets/neptune/export.token")),
+        gryphon_service_token_file=Path(
+            os.getenv(
+                "GRYPHON_SERVICE_TOKEN_FILE",
+                "/run/secrets/gryphon/chronos.token",
+            )
+        ),
+        gryphon_socket_path=os.getenv("GRYPHON_SOCKET_PATH", "/run/gryphon/client.sock"),
+        gryphon_adapter_url=os.getenv(
+            "GRYPHON_ADAPTER_URL",
+            "http://chronos:18280/api/internal/gryphon/command",
+        ),
+        gryphon_timeout_seconds=float(os.getenv("GRYPHON_TIMEOUT_SEC", "5")),
     )
 
 

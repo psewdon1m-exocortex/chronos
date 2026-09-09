@@ -446,9 +446,53 @@ pre {
 .toggle-control input { width: 20px; min-width: 20px; min-height: 20px; height: 20px; accent-color: var(--accent); }
 .wide-command { width: 100%; }
 .settings-action { width: min(326px, 100%); }
+.settings-backup-card { min-height: 782px; }
+.settings-backup-card .backup-content { gap: 41px; padding: 30px 38px 50px; }
+.settings-backup-card .settings-group { display: block; }
+.settings-backup-card .settings-group + .settings-group { border-top: 0; padding-top: 0; }
+.settings-backup-card .settings-group h3 { margin-bottom: 8px; line-height: 1.2; }
+.settings-backup-card .settings-group > p { margin-bottom: 16px; line-height: 1.6; }
+.settings-backup-card .backup-neptune-group > p { margin-bottom: 12px; }
+.settings-backup-card .backup-neptune-group { margin-top: 2px; }
+.backup-neptune-status { margin-top: 2px; }
+.backup-schedule-controls { display: grid; grid-template-columns: 240px 342px; align-items: stretch; gap: 38px; margin-top: 23px; }
+.backup-schedule-fields { display: grid; align-content: space-between; gap: 14px; }
+.backup-interval-row { display: flex; align-items: center; gap: 12px; color: var(--white); }
+.backup-interval-row input { width: 57px; height: 28px; min-height: 28px; padding: 3px 8px; text-align: center; }
+.backup-run-action { width: 342px; height: 68px; }
+.settings-backup-card .backup-version-group > p { margin-bottom: 6px; }
+.settings-bot-card { min-height: 483px; }
+.settings-bot-card .bot-connection-groups { padding-top: 24px; }
+.bot-connection-groups { gap: 50px; }
+.bot-connection-groups .settings-group { gap: 8px; }
+.bot-connection-groups .settings-group h3 { line-height: 1.25; }
+.bot-connection-groups .settings-group + .settings-group { border-top: 0; padding-top: 0; }
+.bot-connection-status { margin-top: 16px; }
+.bot-connection-action { margin-top: 24px; }
+.bot-connection-selected { margin-top: 4px !important; color: var(--text-secondary) !important; }
+.bot-connection-selected strong { color: var(--white); }
+.bot-picker { display: grid; gap: 20px; }
+.bot-picker-list { display: grid; border: 1px solid var(--line-inner); }
+.bot-picker-list > label { min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line-inner); cursor: pointer; }
+.bot-picker-list > label:last-child { border-bottom: 0; }
+.bot-picker-list > label.is-disabled { opacity: .5; cursor: not-allowed; }
+.bot-picker-list input { width: 18px; height: 18px; min-height: 18px; accent-color: var(--accent); }
+.bot-picker-list label > span { display: grid; gap: 3px; }
+.bot-picker-list small { color: var(--text-secondary); }
+.bot-picker-list > p { margin: 0; padding: 16px; color: var(--text-secondary); }
 .kernel-connection-controls { display: grid; grid-template-columns: minmax(220px, 326px) minmax(0, 1fr); gap: 20px; }
 .kernel-connection-controls label { min-width: 0; }
 .kernel-row, .service-status-row { display: grid; min-height: 40px; grid-template-columns: minmax(180px, 1fr) auto 18px; align-items: center; gap: 14px; border: 1px solid var(--line-inner); padding: 8px 14px; }
+.settings-updates-card { min-height: 566px; }
+.settings-updates-card .updates-content { display: block; padding: 28px 38px 54px; }
+.settings-updates-card .settings-group { display: block; }
+.settings-updates-card .settings-group + .settings-group { border-top: 0; padding-top: 0; }
+.settings-updates-card .update-pipeline-group > p { margin-bottom: 6px; }
+.settings-updates-card .update-pipeline-group .service-status-row:first-of-type { margin-top: 29px; }
+.settings-updates-card .update-pipeline-group .service-status-row + .service-status-row { margin-top: 12px; }
+.settings-updates-card .update-pipeline-group > .settings-action { margin-top: 35px; }
+.settings-updates-card .updater-version-group { margin-top: 41px; }
+.settings-updates-card .updater-version-group > p { margin: 8px 0 12px; }
 .logs-command { display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 30px 38px 24px; }
 .logs-command p { margin: 0; color: var(--text-secondary); }
 .event-stream { max-height: 460px; margin: 0 38px 38px; overflow-y: auto; border: 1px solid var(--line-inner); scrollbar-width: none; }
@@ -463,11 +507,6 @@ pre {
 .settings-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding: 30px 38px 38px; }
 .settings-form-grid label { display: grid; min-width: 0; gap: 6px; }
 .settings-form-grid .toggle-control { align-self: end; min-height: 40px; }
-.telegram-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 20px 38px; border: 1px solid var(--line-inner); }
-.telegram-status-grid > div { display: grid; min-width: 0; gap: 6px; min-height: 76px; align-content: center; border-right: 1px solid var(--line-inner); padding: 12px; }
-.telegram-status-grid > div:last-child { border-right: 0; }
-.telegram-status-grid span { color: var(--text-secondary); }
-.telegram-status-grid strong { overflow: hidden; color: var(--accent); text-overflow: ellipsis; white-space: nowrap; }
 .section-description, .link-block { margin: 30px 38px 0; }
 .link-block { display: grid; gap: 14px; padding-bottom: 38px; }
 .link-block > button { width: max-content; }
@@ -562,7 +601,7 @@ pre {
   .current-state-heading, .time-balance-heading, .recent-command { padding: 24px 20px 0; }
   .active-clock { padding-inline: 20px; font-size: 44px; }
   .active-actions { flex-wrap: wrap; padding: 20px; }
-  .category-grid, .metric-grid, .settings-form-grid, .telegram-status-grid { grid-template-columns: 1fr; }
+  .category-grid, .metric-grid, .settings-form-grid { grid-template-columns: 1fr; }
   .category-grid { padding: 20px; }
   .balance-list, .session-compact-list { padding-inline: 20px; }
   .balance-meta { grid-template-columns: minmax(100px, 1fr) 70px 82px; }
@@ -580,6 +619,10 @@ pre {
   .accent-row { grid-template-columns: 40px minmax(0, 1fr); }
   .accent-row button { grid-column: span 1; }
   .settings-groups, .settings-form-grid { padding: 24px 20px; }
+  .settings-backup-card, .settings-bot-card, .settings-updates-card { min-height: 0; }
+  .settings-backup-card .backup-content, .settings-updates-card .updates-content { padding: 24px 20px; }
+  .backup-schedule-controls { grid-template-columns: 1fr; gap: 18px; }
+  .backup-run-action { width: 100%; height: 40px; }
   .kernel-connection-controls { grid-template-columns: 1fr; gap: 12px; }
   .kernel-row, .service-status-row { grid-template-columns: minmax(0, 1fr) auto 18px; }
   .kernel-row > span:nth-child(2) { display: none; }
@@ -587,9 +630,6 @@ pre {
   .event-stream { margin: 0 20px 24px; }
   .event-header, .event-row { grid-template-columns: 74px minmax(0, 1fr); }
   .event-header > span:last-child, .event-row time { display: none; }
-  .telegram-status-grid { margin-inline: 20px; }
-  .telegram-status-grid > div { border-right: 0; border-bottom: 1px solid var(--line-inner); }
-  .telegram-status-grid > div:last-child { border-bottom: 0; }
   .section-description, .link-block { margin-inline: 20px; }
   .documentation-navigation nav { grid-template-columns: 1fr; }
   .documentation-navigation nav > span { grid-column: auto; }
