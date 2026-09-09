@@ -85,4 +85,5 @@ jobs:
           name: chronos-pre-push-gate-${{ github.sha }}
           path: .pre-push-gate-report.json
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
