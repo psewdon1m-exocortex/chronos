@@ -8,6 +8,7 @@ import http.client
 import json
 import re
 import socket
+from uuid import uuid4
 from typing import Any
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -128,6 +129,22 @@ class UpdaterClient:
             {"head_id": self.head_id, "version": version},
             True,
             300,
+        )
+
+    async def initialize_neptune(self, enrollment_code: str, export_url: str) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._request,
+            "POST",
+            "/v1/components/neptune-linux/initialize",
+            {
+                "request_id": str(uuid4()),
+                "head_id": self.head_id,
+                "project_id": "chronos",
+                "export_url": export_url,
+                "enrollment_code": enrollment_code,
+            },
+            True,
+            30,
         )
 
     async def update_gryphon(self, version: str) -> dict[str, Any]:

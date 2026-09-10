@@ -2,7 +2,7 @@
 
 ## Автоматические резервные копии
 
-После обычной установки создайте в Saturn одноразовый Neptune setup code и выполните `sudo chronos-install backup`. Команда сама устанавливает общий Linux-агент при его отсутствии, создаёт локальные секреты, регистрирует Chronos и перезапускает контейнер. Расписание включается в Settings Chronos.
+После обычной установки создайте в Saturn одноразовый Neptune setup code. Если локальный Neptune уже установлен, но Chronos ещё не связан с ним, откройте Settings → Backup, нажмите **Initialize Neptune** и введите код. Команда `sudo chronos-install backup` остаётся способом установить отсутствующий агент и резервным CLI-сценарием. Расписание задаётся в Saturn → Synchronization.
 
 Chronos is a production-ready time tracking service for the Exocortex ecosystem.
 
@@ -136,10 +136,11 @@ Restore header: `X-Updater-Token`.
 - Connect one or more bot tokens with `gryphon bot connect`, then use **Link
   Chronos function** in the Bot connection Settings card to select one of those
   bots. Chronos receives only its service credential and never sees a bot token.
-- Telegram-user authorization remains a separate CLI action:
-  `gryphon link issue chronos`, followed by the printed `/link CODE` in a private
-  chat with the selected bot. The Settings card also checks and installs verified
-  Gryphon Linux updates through the host Updater.
+- When a bot function is connected but no Telegram user is bound, **Initialize
+  bot** in Settings creates a one-time `/link CODE` challenge. Send that command
+  in a private chat with the selected bot. `gryphon link issue chronos` remains
+  the equivalent CLI fallback. The Settings card also checks and installs
+  verified Gryphon Linux updates through the host Updater.
 - Reminders and daily summaries are sent through Gryphon's service-scoped Unix
   socket.
 

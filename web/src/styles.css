@@ -480,6 +480,8 @@ pre {
 .bot-picker-list label > span { display: grid; gap: 3px; }
 .bot-picker-list small { color: var(--text-secondary); }
 .bot-picker-list > p { margin: 0; padding: 16px; color: var(--text-secondary); }
+.one-time-code { border: 1px solid var(--accent); padding: 14px; overflow-wrap: anywhere; }
+.one-time-code strong { color: var(--accent); font-size: 18px; }
 .kernel-connection-controls { display: grid; grid-template-columns: minmax(220px, 326px) minmax(0, 1fr); gap: 20px; }
 .kernel-connection-controls label { min-width: 0; }
 .kernel-row, .service-status-row { display: grid; min-height: 40px; grid-template-columns: minmax(180px, 1fr) auto 18px; align-items: center; gap: 14px; border: 1px solid var(--line-inner); padding: 8px 14px; }

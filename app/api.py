@@ -131,6 +131,10 @@ class NeptuneScheduleInput(BaseModel):
     interval_hours: int = Field(ge=1, le=8760)
 
 
+class NeptuneInitializationInput(BaseModel):
+    enrollment_code: str = Field(pattern=r"^[A-Za-z0-9_-]{32}$")
+
+
 class UpdateInput(BaseModel):
     version: str = Field(min_length=5, max_length=64)
 
@@ -1012,6 +1016,23 @@ def create_app() -> FastAPI:
     async def neptune_status(request: Request, _: dict[str, Any] = Depends(operator)):
         return await request.app.state.neptune.status()
 
+    @app.get("/api/neptune/availability")
+    async def neptune_availability(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await request.app.state.neptune.availability()
+
+    @app.post("/api/neptune/initialize", status_code=202)
+    async def neptune_initialize(request: Request, body: NeptuneInitializationInput, _: dict[str, Any] = Depends(mutation_operator)):
+        config = request.app.state.runtime.config
+        result = await request.app.state.updater.initialize_neptune(
+            body.enrollment_code,
+            f"http://127.0.0.1:{config.listen_port}/api/internal/neptune/backup",
+        )
+        await request.app.state.store.audit(
+            status="success", action="neptune.initialize", target=str(result.get("id") or "accepted"),
+            actor="operator", message="Neptune initialization handed to local Updater",
+        )
+        return result
+
     @app.put("/api/neptune/schedule", status_code=204)
     async def neptune_schedule(request: Request, body: NeptuneScheduleInput, _: dict[str, Any] = Depends(mutation_operator)):
         await request.app.state.neptune.schedule(body.enabled, body.interval_hours)
@@ -1077,6 +1098,15 @@ def create_app() -> FastAPI:
             target="chronos",
             actor="operator",
             message="Chronos function unlinked from Gryphon",
+        )
+        return result
+
+    @app.post("/api/gryphon/link-challenge", status_code=201)
+    async def gryphon_link_challenge(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        result = await request.app.state.gryphon_client.issue_link_challenge()
+        await request.app.state.store.audit(
+            status="success", action="gryphon.binding.challenge.created", target="chronos",
+            actor="operator", message="One-time Gryphon link challenge created",
         )
         return result
 

@@ -66,7 +66,7 @@ const SECTIONS = [
     title: "Telegram",
     content: (
       <>
-        <p>Telegram transport and identity binding are owned by Gryphon. After the host CLI connects one or more bots, <strong>Link Chronos function</strong> in Settings selects one from that Gryphon-owned pool. Telegram-user authorization remains the separate <code>gryphon link issue chronos</code> CLI flow. The same card manages verified Gryphon Linux updates through Updater.</p>
+        <p>Telegram transport and identity binding are owned by Gryphon. After the host CLI connects one or more bots, <strong>Link Chronos function</strong> in Settings selects one from that Gryphon-owned pool. When the function is connected but no Telegram account is linked, <strong>Initialize bot</strong> creates the same one-time <code>/link</code> challenge as the host CLI. The same card manages verified Gryphon Linux updates through Updater.</p>
         <h3>Commands</h3>
         <pre><code>{`/chronos status              active timer\n/chronos stats               today\n/chronos week                current week\n/chronos month               current month\n/chronos stop                stop active timer\n/chronos undo                undo last timer action\n/chronos retype              change the last completed session category\n/chronos backfill MINUTES    insert a completed session for the last N minutes`}</code></pre>
         <p>Retyping offers the four fixed category buttons. Backfill asks for whole minutes, then a category. It inserts a completed session, trims or removes overlapped entries, and preserves any active timer with the overlapped time deducted.</p>

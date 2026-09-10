@@ -117,7 +117,7 @@ enable_backup() {
   fi
   printf '%s\n' "$enrollment_code" | updater neptune enroll --head chronos --project chronos --export-url "http://127.0.0.1:$(get_env CHRONOS_LISTEN_PORT)/api/internal/neptune/backup"
   unset enrollment_code
-  echo "Chronos automatic backup is connected. Enable its schedule in Settings."
+  echo "Chronos automatic backup is connected. Manage its schedule in Saturn Synchronization."
 }
 
 prepare() {

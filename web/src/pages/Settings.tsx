@@ -31,17 +31,6 @@ interface BackupInspection {
   restore_mode: "replace";
 }
 
-interface NeptuneStatus {
-  product: string;
-  version: string;
-  client_instance_id: string;
-  project: { projectId: string; enabled: boolean; interval_hours: number; next_run_at?: string };
-  active: boolean;
-  last_attempt_at?: string;
-  last_success_at?: string;
-  latest_error?: string;
-}
-
 interface GryphonStatus {
   version: string;
   serviceId: string;
@@ -59,6 +48,9 @@ interface GryphonBot {
   state: string;
   selected: boolean;
 }
+
+interface NeptuneAvailability { installed: boolean; linked: boolean; state: "linked" | "unlinked" | "unavailable"; version?: string | null }
+interface GryphonChallenge { code: string; expiresAt: string; command: string; botUsername?: string }
 
 const FALLBACK_ZONES = ["UTC", "Europe/Istanbul", "Europe/Moscow", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Tokyo"];
 
@@ -111,11 +103,10 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [inspection, setInspection] = useState<BackupInspection | null>(null);
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState("");
-  const [neptune, setNeptune] = useState<NeptuneStatus | null>(null);
-  const [neptuneInterval, setNeptuneInterval] = useState(24);
+  const [neptune, setNeptune] = useState<NeptuneAvailability | null>(null);
+  const [neptuneOpen, setNeptuneOpen] = useState(false);
+  const [neptuneCode, setNeptuneCode] = useState("");
   const [neptunePending, setNeptunePending] = useState(false);
-  const [neptuneError, setNeptuneError] = useState("");
-  const [neptuneRelease, setNeptuneRelease] = useState<ReleaseCheck | null>(null);
   const [gryphon, setGryphon] = useState<GryphonStatus | null>(null);
   const [gryphonBots, setGryphonBots] = useState<GryphonBot[]>([]);
   const [gryphonBotId, setGryphonBotId] = useState("");
@@ -123,6 +114,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [gryphonPending, setGryphonPending] = useState(false);
   const [gryphonError, setGryphonError] = useState("");
   const [gryphonRelease, setGryphonRelease] = useState<ReleaseCheck | null>(null);
+  const [gryphonChallenge, setGryphonChallenge] = useState<GryphonChallenge | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [release, setRelease] = useState<ReleaseCheck | null>(null);
   const [updatePending, setUpdatePending] = useState(false);
@@ -167,10 +159,8 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
 
   useEffect(() => { void load(); }, [load]);
   const loadNeptune = useCallback(async () => {
-    try {
-      const status = await api<NeptuneStatus>("/api/neptune/status");
-      setNeptune(status); setNeptuneInterval(status.project.interval_hours); setNeptuneError("");
-    } catch (error) { setNeptune(null); setNeptuneError(error instanceof Error ? error.message : "Unavailable"); }
+    try { setNeptune(await api<NeptuneAvailability>("/api/neptune/availability")); }
+    catch { setNeptune({ installed: false, linked: false, state: "unavailable" }); }
   }, []);
   useEffect(() => { void loadNeptune(); }, [loadNeptune]);
   const loadGryphon = useCallback(async () => {
@@ -323,42 +313,6 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const saveNeptune = async (enabled: boolean) => {
-    setNeptunePending(true);
-    try {
-      await api("/api/neptune/schedule", { method: "PUT", body: JSON.stringify({ enabled, interval_hours: neptuneInterval }) });
-      await loadNeptune();
-      notify("success", enabled ? "Automatic Saturn backup enabled." : "Automatic Saturn backup disabled.");
-    } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune schedule could not be saved."); }
-    finally { setNeptunePending(false); }
-  };
-
-  const runNeptune = async () => {
-    setNeptunePending(true);
-    try { await api("/api/neptune/runs", { method: "POST" }); await loadNeptune(); notify("info", "Neptune backup accepted."); }
-    catch (error) { notify("error", error instanceof Error ? error.message : "Neptune backup could not start."); }
-    finally { setNeptunePending(false); }
-  };
-
-  const checkNeptune = async () => {
-    setNeptunePending(true);
-    try { setNeptuneRelease(await api<ReleaseCheck>("/api/neptune/update/check", { method: "POST" })); }
-    catch (error) { notify("error", error instanceof Error ? error.message : "Neptune release check failed."); }
-    finally { setNeptunePending(false); }
-  };
-
-  const installNeptune = async () => {
-    const version = neptuneRelease?.available_version;
-    if (!version) return;
-    setNeptunePending(true);
-    try {
-      await api("/api/neptune/update/install", { method: "POST", body: JSON.stringify({ version }) });
-      setNeptuneRelease(null);
-      await loadNeptune();
-      notify("success", `Neptune ${version} installed.`);
-    } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune update failed."); }
-    finally { setNeptunePending(false); }
-  };
 
   const openGryphonConnection = async () => {
     setGryphonPending(true);
@@ -368,6 +322,25 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
       setGryphonBotId(result.bots.find((bot) => bot.state === "ready")?.id ?? "");
       setGryphonConnectionOpen(true);
     } catch (error) { notify("error", error instanceof Error ? error.message : "Gryphon bot list could not be loaded."); }
+    finally { setGryphonPending(false); }
+  };
+
+  const initializeNeptune = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!/^[A-Za-z0-9_-]{32}$/.test(neptuneCode)) { notify("error", "Enter the 32-character setup code from Saturn."); return; }
+    setNeptunePending(true);
+    try {
+      await api("/api/neptune/initialize", { method: "POST", body: JSON.stringify({ enrollment_code: neptuneCode }) });
+      setNeptuneCode(""); setNeptuneOpen(false);
+      notify("success", "Neptune initialization started. Chronos may reconnect while the service is linked.");
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune initialization could not be started."); }
+    finally { setNeptunePending(false); }
+  };
+
+  const issueGryphonLink = async () => {
+    setGryphonPending(true);
+    try { setGryphonChallenge(await api<GryphonChallenge>("/api/gryphon/link-challenge", { method: "POST" })); }
+    catch (error) { notify("error", error instanceof Error ? error.message : "Telegram link code could not be created."); }
     finally { setGryphonPending(false); }
   };
 
@@ -515,13 +488,12 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
       <div className="settings-groups backup-content">
         <section className="settings-group"><h3>System snapshot</h3><p>Logical snapshots contain sessions and presentation settings, but no Access Key or service tokens.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
         <section className="settings-group"><h3>Restore snapshot</h3><p>Validation completes before replacement begins. A pre-restore transaction protects the current timeline.</p><button type="button" className="settings-action" onClick={() => setRestoreOpen(true)} data-smart-hover>Browse local snapshot archive</button></section>
-        <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Neptune exports the same ZIP as the manual action and uploads it without changing its bytes.</p><div className="service-status-row backup-neptune-status" title={neptuneError || undefined}><span>Local Neptune agent:</span><span className={neptune ? "status-success" : "status-error"}>{neptune ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={neptune ? "success" : "danger"} /></div><div className="backup-schedule-controls"><div className="backup-schedule-fields"><label className="toggle-control"><input type="checkbox" checked={neptune?.project.enabled ?? false} disabled={!neptune || neptunePending} onChange={(event) => void saveNeptune(event.target.checked)} /><span>Enable automatic backups</span></label><label className="backup-interval-row"><span>Interval in hours:</span><input type="number" min={1} max={8760} value={neptuneInterval} disabled={!neptune || neptunePending} onChange={(event) => setNeptuneInterval(Number(event.target.value))} onBlur={() => { if (neptune) void saveNeptune(neptune.project.enabled); }} /></label></div><button type="button" className="settings-action backup-run-action" disabled={!neptune || neptune.active || neptunePending} onClick={() => void runNeptune()} data-smart-hover>Back up to Saturn now</button></div></section>
-        <section className="settings-group backup-version-group"><h3>Neptune version</h3><p>Current installed version: {neptune?.version ?? "unavailable"}{neptuneRelease?.available_version ? ` · latest ${neptuneRelease.available_version}` : ""}</p><button type="button" className="settings-action" disabled={!neptune || neptunePending} onClick={() => void checkNeptune()} data-smart-hover>Check Neptune for updates</button>{neptuneRelease?.update_available && <button type="button" className="settings-action" disabled={neptunePending} onClick={() => void installNeptune()} data-smart-hover>{neptunePending ? "Installing…" : `Install Neptune ${neptuneRelease.available_version}`}</button>}</section>
+        <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Schedules, remote runs and Neptune fleet status are managed only from Saturn → Synchronization. Manual Chronos ZIP download and restore remain here.</p><div className="service-status-row"><span>Local Neptune agent:</span><span className={neptune?.linked ? "status-success" : "status-error"}>{neptune?.linked ? "Linked to Saturn" : neptune?.installed ? "Detected · not linked" : "Not installed"}</span><StatusSquare state={neptune?.linked ? "success" : "danger"} /></div>{neptune?.installed && !neptune.linked && <button type="button" className="settings-action" disabled={neptunePending || !updates?.updater.available} onClick={() => setNeptuneOpen(true)} data-smart-hover>Initialize Neptune</button>}</section>
       </div>
     </UniversalCard>,
     gryphon: <UniversalCard title="Bot connection" {...cardProps("gryphon", "settings-bot-card")}>
       <div className="settings-groups bot-connection-groups">
-        <section className="settings-group"><h3>Gryphon bot binding</h3><p>Gryphon owns the Telegram connection, service receives only service-scoped commands.</p><div className="service-status-row bot-connection-status"><span>Local Gryphon agent:</span><span className={gryphon ? "status-success" : "status-error"}>{gryphon ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={gryphon ? "success" : "danger"} /></div>{gryphon?.connected && gryphon.bot ? <p className="bot-connection-selected">Connected bot: <strong>{gryphon.bot.username ? `@${gryphon.bot.username}` : gryphon.bot.alias}</strong></p> : null}<button type="button" className="settings-action bot-connection-action" disabled={!gryphon || gryphonPending} onClick={() => void (gryphon?.connected ? disconnectGryphon() : openGryphonConnection())} data-smart-hover>{gryphonPending ? "Working…" : gryphon?.connected ? "Unlink Chronos function" : "Link Chronos function"}</button>{!gryphon && gryphonError ? <p className="inline-error">{gryphonError}</p> : null}</section>
+        <section className="settings-group"><h3>Gryphon bot binding</h3><p>Gryphon owns the Telegram connection, service receives only service-scoped commands.</p><div className="service-status-row bot-connection-status"><span>Local Gryphon agent:</span><span className={gryphon ? "status-success" : "status-error"}>{gryphon ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={gryphon ? "success" : "danger"} /></div>{gryphon?.connected && gryphon.bot ? <p className="bot-connection-selected">Connected bot: <strong>{gryphon.bot.username ? `@${gryphon.bot.username}` : gryphon.bot.alias}</strong></p> : null}{gryphon?.connected && !gryphon.binding ? <button type="button" className="settings-action bot-connection-action" disabled={gryphonPending} onClick={() => void issueGryphonLink()} data-smart-hover>{gryphonPending ? "Creating…" : "Initialize bot"}</button> : null}<button type="button" className="settings-action bot-connection-action" disabled={!gryphon || gryphonPending} onClick={() => void (gryphon?.connected ? disconnectGryphon() : openGryphonConnection())} data-smart-hover>{gryphonPending ? "Working…" : gryphon?.connected ? "Unlink Chronos function" : "Link Chronos function"}</button>{gryphon?.binding ? <p className="bot-connection-selected">Telegram account linked.</p> : null}{!gryphon && gryphonError ? <p className="inline-error">{gryphonError}</p> : null}</section>
         <section className="settings-group"><h3>Gryphon version</h3><p>Current installed version: <strong>{gryphon?.version ?? "unavailable"}</strong>{gryphonRelease?.available_version ? ` · latest ${gryphonRelease.available_version}` : ""}</p><button type="button" className="settings-action" disabled={!gryphon || gryphonPending} onClick={() => void checkGryphon()} data-smart-hover>Check Gryphon for updates</button>{gryphonRelease?.update_available && <button type="button" className="settings-action" disabled={gryphonPending} onClick={() => void installGryphon()} data-smart-hover>{gryphonPending ? "Installing…" : `Install Gryphon ${gryphonRelease.available_version}`}</button>}</section>
       </div>
     </UniversalCard>,
@@ -564,5 +536,8 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
 
     {updateOpen && <Overlay title="Chronos update discovery" onClose={() => setUpdateOpen(false)} dismissible={!updatePending}><div className="update-flow"><div className="service-status-row"><span>Installed version</span><strong>{updates?.installed_version ?? data.runtime.version}</strong></div><div className="service-status-row"><span>Approved registry</span><strong>{data.runtime.register_revision ?? "Offline / no last-known revision"}</strong></div><div className="service-status-row"><span>Local updater</span><strong>{updates?.updater.available ? "Available" : "Unavailable"}</strong></div>{updatePending && <p className="form-hint">Checking and verifying the approved release source…</p>}{release && <div className="release-result"><strong>{release.update_available ? `Verified release ${release.available_version} is available` : "Installed release is up to date"}</strong>{release.published_at && <span>Published {localDate(release.published_at, values)}</span>}{release.release_url && <a href={release.release_url} target="_blank" rel="noreferrer">Open release notes</a>}</div>}{job && <pre className="job-state">{JSON.stringify(job, null, 2)}</pre>}<div className="form-actions"><button type="button" disabled={updatePending} onClick={() => setUpdateOpen(false)} data-smart-hover>Close</button><button type="button" disabled={updatePending} onClick={() => void checkUpdate()} data-smart-hover>Check again</button>{release?.update_available && <button type="button" disabled={updatePending || !updates?.updater.available} onClick={() => void applyUpdate()} data-smart-hover>Update to {release.available_version}</button>}</div></div></Overlay>}
 
+    {neptuneOpen && <Overlay title="Initialize Neptune" onClose={() => !neptunePending && setNeptuneOpen(false)} dismissible={!neptuneCode && !neptunePending}><form className="form-grid" onSubmit={initializeNeptune}><p className="form-hint">Create a one-time Linux pipeline code in Saturn → Synchronization. It is sent directly to the local Updater and is never stored by Chronos.</p><label><span>Saturn setup code</span><input value={neptuneCode} minLength={32} maxLength={32} autoComplete="off" required onChange={(event) => setNeptuneCode(event.target.value.trim())} /></label><div className="form-actions"><button type="button" disabled={neptunePending} onClick={() => { setNeptuneOpen(false); setNeptuneCode(""); }} data-smart-hover>Cancel</button><SubmitButton pending={neptunePending} label="Initialize" pendingLabel="Starting…" /></div></form></Overlay>}
+
+    {gryphonChallenge && <Overlay title="Link Telegram account" onClose={() => setGryphonChallenge(null)}><div className="form-grid"><p className="form-hint">Send this command to {gryphonChallenge.botUsername ? `@${gryphonChallenge.botUsername}` : "the connected bot"}. It can be used once and expires {localDate(gryphonChallenge.expiresAt, values)}.</p><div className="one-time-code"><strong>{gryphonChallenge.command}</strong></div><div className="form-actions"><button type="button" onClick={() => void navigator.clipboard.writeText(gryphonChallenge.command).then(() => notify("success", "Command copied."))} data-smart-hover>Copy command</button><button type="button" onClick={() => setGryphonChallenge(null)} data-smart-hover>Done</button></div></div></Overlay>}
   </>;
 }

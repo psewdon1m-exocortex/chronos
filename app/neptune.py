@@ -53,6 +53,31 @@ class NeptuneClient:
         finally:
             connection.close()
 
+    def _health(self) -> dict[str, Any]:
+        connection = UnixHTTPConnection(self.socket_path, timeout=3)
+        try:
+            connection.request("GET", "/v1/health", headers={"Accept": "application/json", "Host": "neptune.local"})
+            response = connection.getresponse()
+            result = json.loads(response.read(1024 * 1024).decode("utf-8") or "{}")
+            if not 200 <= response.status < 300 or not isinstance(result, dict):
+                raise NeptuneError("Neptune health probe failed", 503)
+            return result
+        except (FileNotFoundError, ConnectionRefusedError, PermissionError, OSError, http.client.HTTPException, json.JSONDecodeError) as error:
+            raise NeptuneError("Neptune is not installed or is unavailable on this VPS", 503) from error
+        finally:
+            connection.close()
+
+    async def availability(self) -> dict[str, Any]:
+        try:
+            health = await asyncio.to_thread(self._health)
+        except NeptuneError:
+            return {"installed": False, "linked": False, "state": "unavailable", "version": None}
+        try:
+            status = await self.status()
+            return {"installed": True, "linked": True, "state": "linked", **status}
+        except NeptuneError:
+            return {"installed": True, "linked": False, "state": "unlinked", "version": health.get("version")}
+
     async def status(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, "GET", "/status")
 

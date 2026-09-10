@@ -128,6 +128,12 @@ class GryphonClient:
     async def disconnect(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, "DELETE", "/v1/service/connection")
 
+    async def issue_link_challenge(self) -> dict[str, Any]:
+        result = await asyncio.to_thread(self._request, "POST", "/v1/service/link-challenges")
+        if not all(isinstance(result.get(key), str) for key in ("code", "expiresAt", "command")):
+            raise GryphonError("Gryphon returned an invalid link challenge")
+        return result
+
     async def notify(self, text: str, idempotency_key: str) -> None:
         await asyncio.to_thread(
             self._request,
