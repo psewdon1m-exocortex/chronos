@@ -2,7 +2,7 @@
 
 Chronos is the single-operator time-tracking service in the Exocortex
 workspace. The workspace-wide documentation in
-[Part 00](../../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md) is
+[Part 00](https://github.com/psewdon1m-exocortex/general/blob/main/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md) is
 normative; this file adds Chronos-specific detail and cannot weaken an
 applicable central requirement.
 
@@ -23,7 +23,7 @@ Gryphon owns bot tokens, webhooks, update deduplication, Telegram identity
 binding and outbound delivery. Chronos accepts only authenticated,
 service-scoped commands from Gryphon and applies them to the same timer model
 used by the web interface. This boundary follows
-[Part 09](../../.docs/PART_09_SERVICE_AGENTS_DEPLOYMENT_AND_LIFECYCLE.md).
+[Part 09](https://github.com/psewdon1m-exocortex/general/blob/main/PART_09_SERVICE_AGENTS_DEPLOYMENT_AND_LIFECYCLE.md).
 
 ## Product boundaries
 

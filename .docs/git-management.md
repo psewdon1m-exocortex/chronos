@@ -8,14 +8,14 @@
   review policy. The retired `dev`/`stage`/`prod` branch model is not used.
 
 The workspace-wide rules in
-[Part 00](../../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md) and
-[Part 05](../../.docs/PART_05_CI_RELEASES_AND_LOCAL_UPDATES.md) are normative.
+[Part 00](https://github.com/psewdon1m-exocortex/general/blob/main/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md) and
+[Part 05](https://github.com/psewdon1m-exocortex/general/blob/main/PART_05_CI_RELEASES_AND_LOCAL_UPDATES.md) are normative.
 
 ## Commits and pushes
 
 Keep each commit reviewable and describe the observable change. Before pushing,
 run the repository checks and complete the
-[Part 06 pre-push gate](../../.docs/PART_06_UNIFIED_ACCEPTANCE_CHECKLIST.md).
+[Part 06 pre-push gate](https://github.com/psewdon1m-exocortex/general/blob/main/PART_06_UNIFIED_ACCEPTANCE_CHECKLIST.md).
 The gate includes an always-required security review plus conditional backup,
 update, Documentation, technical-documentation, SEO/GEO and concealment checks.
 
@@ -54,6 +54,6 @@ release and do not publish from a mutable branch or a `latest` bootstrap URL.
 
 The bootstrap, environment, server-managed Nginx and operator sequence are
 defined by
-[Part 04](../../.docs/PART_04_BOOTSTRAP_AND_DEPLOYMENT.md). Chronos owns its
+[Part 04](https://github.com/psewdon1m-exocortex/general/blob/main/PART_04_BOOTSTRAP_AND_DEPLOYMENT.md). Chronos owns its
 separate bootstrap and `.env`; trust is not prepared with `scp`, a manual
 fingerprint or a key downloaded beside the manifest.
