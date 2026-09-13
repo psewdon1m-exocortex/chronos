@@ -1,27 +1,36 @@
 # Chronos module description
 
-Chronos is the centralized time tracker service inside Exocortex.
+Chronos is the single-operator time-tracking service in the Exocortex
+workspace. The workspace-wide documentation in
+[Part 00](../../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md) is
+normative; this file adds Chronos-specific detail and cannot weaken an
+applicable central requirement.
 
-- Single operator model (one user profile).
-- Four fixed categories:
-  - Recovery
-  - Accumulation
-  - Execution
-  - Maintenance
-- Web interface + Telegram bot in one product.
-- Full backup and restore path.
-- Kernel Register driven config and Updater integration.
+## Responsibilities
 
-## Current behavior
+- Track timer sessions in the fixed Recovery, Accumulation, Execution and
+  Maintenance categories.
+- Provide the authenticated web interface, history, corrections, analytics,
+  settings, audit trail, backup and restore workflows.
+- Resolve non-secret coordinates and secret references through Kernel Register
+  and use the host Updater for verified releases and shared-agent operations.
+- Expose a service-scoped command adapter for Gryphon.
 
-- Timer session tracking with start/stop and manual corrections.
-- Timeline and analytics views in UI.
-- Activity history and audit trail.
-- Per-operator settings including timezone and preferences.
-- Release control through Updater contract endpoints.
+## Telegram boundary
 
-## Boundaries
+Chronos contains no Telegram bot runtime and stores no Telegram bot token.
+Gryphon owns bot tokens, webhooks, update deduplication, Telegram identity
+binding and outbound delivery. Chronos accepts only authenticated,
+service-scoped commands from Gryphon and applies them to the same timer model
+used by the web interface. This boundary follows
+[Part 09](../../.docs/PART_09_SERVICE_AGENTS_DEPLOYMENT_AND_LIFECYCLE.md).
 
-- Categories are fixed and cannot be renamed in current release.
-- Multi-user mode is not enabled in current version.
-- Telegram and web work with one shared data model.
+## Product boundaries
+
+- The current deployment is single-operator.
+- Category identifiers are fixed and cannot be renamed.
+- Browser login follows the public-authenticated profile: the sign-in page is
+  reachable from every client IP, while the Access Key and bounded application
+  session protect all operator data.
+- Public ingress and TLS belong to the server-managed Nginx. Chronos does not
+  ship an embedded Nginx and does not use coturn.
