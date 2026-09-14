@@ -173,14 +173,15 @@ Chronos requires the additive typed profile in [app/deployment-profile.json](app
 
 - Gryphon owns the bot token, webhook, update deduplication and the
   service-scoped Telegram identity binding. Chronos contains no bot runtime.
-- Command flow: start/stop by category, quick summary, retype the last completed
-  session with `/chronos retype`, and insert a completed recent session with
-  `/chronos backfill MINUTES`.
+- Command flow: `/timer` opens the four persistent category buttons; `/active`,
+  `/today`, `/week` and `/month` report timer state; `/stop`, `/undo` and
+  `/retype` mutate it; `/backfill` prompts for minutes and also accepts a minute
+  value on the same command.
 - Chronos exposes `POST /internal/gryphon/command`; the endpoint accepts
   only the bearer token shared when the service connection is created.
-- Register a bot in Settings (or `gryphon bot connect`), then use **Link
-  Chronos function** in the Bot connection Settings card to select one of those
-  bots. A submitted bot token is forwarded once and never persisted by Chronos.
+- Connect a bot with `sudo gryphon bot connect ALIAS`, then use **Link Chronos
+  function** in the Bot connection Settings card to select it. Chronos never
+  accepts or persists a bot token.
 - When a bot function is connected but no Telegram user is bound, **Initialize
   bot** in Settings creates a one-time `/link CODE` challenge. Send that command
   in a private chat with the selected bot. `gryphon link issue chronos` remains

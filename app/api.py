@@ -421,13 +421,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     notification_task = asyncio.create_task(
         notifications.run(), name="gryphon-notification-supervisor"
     )
+    catalog_task = asyncio.create_task(
+        gryphon_client.maintain_command_catalog(), name="gryphon-command-catalog"
+    )
     try:
         yield
     finally:
         register_task.cancel()
         await notifications.stop()
         notification_task.cancel()
-        for task in (register_task, notification_task):
+        catalog_task.cancel()
+        for task in (register_task, notification_task, catalog_task):
             with suppress(asyncio.CancelledError):
                 await task
         await pool.close()
@@ -436,7 +440,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Chronos",
-        version="0.1.0",
+        version="0.1.1",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -1050,10 +1054,6 @@ def create_app() -> FastAPI:
     @app.post("/api/gryphon/initialize", status_code=202)
     async def gryphon_initialize(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
         return await request.app.state.updater.lifecycle("gryphon-initialization")
-
-    @app.post("/api/gryphon/bots", status_code=202)
-    async def gryphon_add_bot(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
-        return await request.app.state.updater.lifecycle("gryphon-bot", alias=str(body.get("alias") or ""), bot_token=str(body.get("bot_token") or ""))
 
     @app.post("/api/updates/agent/install", status_code=202)
     async def updater_self_update(request: Request, _: dict[str, Any] = Depends(mutation_operator)):

@@ -1,10 +1,10 @@
 # Deploying chronos
 
-This runbook applies to the next signed chronos-v0.1.0 release. Source changes are not a published release. Start only after the exact immutable tag, anonymous assets, signature and Part 12 report pass CI.
+This runbook applies to the next signed chronos-v0.1.1 release. Source changes are not a published release. Start only after the exact immutable tag, anonymous assets, signature and Part 12 report pass CI.
 
 ## Ownership and release order
 
-Kernel, Volt and Saturn are already deployed and are not replaced by this installer. Publish compatible Updater 0.4.6 first; the head bundle pins it. Updater upgrades an older host agent and adds this head to its existing registry. Existing newer agents are reused. Publish Neptune Linux 0.1.6 before connecting the new heads: it bounds shared Kernel requests and preserves older state. Gryphon Linux 0.1.2 is compatible and needs no new release. Migration fixtures cover Updater 0.4.3/0.4.4/0.4.5, Neptune Linux 0.1.0/0.1.1 and unified 0.1.5 and Gryphon Linux 0.1.0/0.1.1; first read actual server versions before upgrading.
+Kernel, Volt and Saturn are already deployed and are not replaced by this installer. Publish compatible Updater 0.4.6 first; the head bundle pins it. Updater upgrades an older host agent and adds this head to its existing registry. Existing newer agents are reused. Publish Neptune Linux 0.1.6 before connecting the new heads: it bounds shared Kernel requests and preserves older state. Publish Gryphon Linux 0.1.4 before Chronos so the global command catalog, persistent keyboard and pending input protocol are available. Migration fixtures cover Updater 0.4.3/0.4.4/0.4.5, Neptune Linux 0.1.0/0.1.1 and unified 0.1.5 and Gryphon Linux 0.1.0/0.1.1; first read actual server versions before upgrading.
 
 The operator explicitly authorized this head profile on 2026-09-14. Its additive typed profile lives in app/deployment-profile.json. Kernel's initial six-service profile remains unchanged. Add bindings manually without replacing or pruning existing entries; the head validates its own required keys, including content branch as a branch rather than a URL.
 
@@ -13,7 +13,7 @@ The operator explicitly authorized this head profile on 2026-09-14. Its additive
 Record hostname, working directory and installed agent versions before changes. Prepare Docker Compose v2, curl, OpenSSL, Python 3 and server nginx yourself. DNS egress, github.com/release-assets.githubusercontent.com, ghcr.io and the Kernel/Saturn HTTPS origins must be reachable. No incoming application port is public.
 
 ```bash
-curl -fsSL https://github.com/psewdon1m-exocortex/chronos/releases/download/chronos-v0.1.0/bootstrap.sh | sudo sh
+curl -fsSL https://github.com/psewdon1m-exocortex/chronos/releases/download/chronos-v0.1.1/bootstrap.sh | sudo sh
 sudoedit /opt/exocortex/chronos/.env
 sudo chmod 600 /opt/exocortex/chronos/.env
 sudo chronos-install

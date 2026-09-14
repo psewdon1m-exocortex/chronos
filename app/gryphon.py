@@ -16,7 +16,19 @@ from .timer_service import TimerError, TimerService, timezone_for
 
 _USER_ID = re.compile(r"^[1-9]\d{0,18}$")
 _CHAT_ID = re.compile(r"^-?[1-9]\d{0,18}$")
-_COMMAND = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
+_COMMAND = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+CHRONOS_COMMAND_CATALOG: tuple[dict[str, str], ...] = (
+    {"name": "timer", "description": "Open Chronos timer controls", "adapterCommand": "menu"},
+    {"name": "active", "description": "Show the active timer", "adapterCommand": "status"},
+    {"name": "today", "description": "Show today's tracked time", "adapterCommand": "stats"},
+    {"name": "week", "description": "Show this week's tracked time", "adapterCommand": "week"},
+    {"name": "month", "description": "Show this month's tracked time", "adapterCommand": "month"},
+    {"name": "stop", "description": "Stop the active timer", "adapterCommand": "stop"},
+    {"name": "undo", "description": "Undo the latest timer change", "adapterCommand": "undo"},
+    {"name": "retype", "description": "Change the latest session category", "adapterCommand": "retype"},
+    {"name": "backfill", "description": "Add a completed timer session", "adapterCommand": "backfill"},
+)
 
 
 class GryphonError(RuntimeError):
@@ -114,7 +126,7 @@ class GryphonClient:
     async def connect(self, bot_id: str, adapter_url: str) -> dict[str, Any]:
         if not bot_id or len(bot_id) > 200:
             raise GryphonError("Gryphon bot ID is invalid", 400)
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             self._request,
             "PUT",
             "/v1/service/connection",
@@ -123,6 +135,53 @@ class GryphonClient:
                 "commandPrefix": "chronos",
                 "adapterUrl": adapter_url,
             },
+        )
+        try:
+            await self.sync_command_catalog()
+        except GryphonError:
+            # Connection is already durable. The background reconciler retries.
+            pass
+        return result
+
+    async def sync_command_catalog(self) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            self._request,
+            "PUT",
+            "/v1/service/command-catalog",
+            {
+                "schema": "exocortex.telegram.command-catalog.v1",
+                "commands": [dict(command) for command in CHRONOS_COMMAND_CATALOG],
+            },
+        )
+        if (
+            result.get("schema") != "exocortex.telegram.command-catalog.v1"
+            or result.get("serviceId") != "chronos"
+            or not isinstance(result.get("commands"), list)
+        ):
+            raise GryphonError("Gryphon returned an invalid command catalog")
+        return result
+
+    async def maintain_command_catalog(self, retry_seconds: float = 60) -> None:
+        while True:
+            try:
+                status = await self.status()
+                if status["connected"] and not self._command_catalog_is_current(status):
+                    await self.sync_command_catalog()
+            except GryphonError:
+                pass
+            await asyncio.sleep(retry_seconds)
+
+    @staticmethod
+    def _command_catalog_is_current(status: dict[str, Any]) -> bool:
+        commands = status.get("commands")
+        if not isinstance(commands, list) or len(commands) != len(CHRONOS_COMMAND_CATALOG):
+            return False
+        current_commands = sorted(commands, key=lambda item: str(item.get("name") if isinstance(item, dict) else ""))
+        expected_commands = sorted(CHRONOS_COMMAND_CATALOG, key=lambda item: item["name"])
+        return all(
+            isinstance(current, dict)
+            and all(current.get(key) == expected[key] for key in ("name", "adapterCommand", "description"))
+            for current, expected in zip(current_commands, expected_commands, strict=True)
         )
 
     async def disconnect(self) -> dict[str, Any]:
@@ -161,11 +220,19 @@ def format_duration(seconds: int) -> str:
 
 
 def _message(
-    text: str, buttons: list[list[dict[str, Any]]] | None = None
+    text: str,
+    buttons: list[list[dict[str, Any]]] | None = None,
+    *,
+    reply_keyboard: dict[str, Any] | None = None,
+    expect_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     action: dict[str, Any] = {"type": "send_message", "text": text}
     if buttons:
         action["buttons"] = buttons
+    if reply_keyboard is not None:
+        action["replyKeyboard"] = reply_keyboard
+    if expect_input is not None:
+        action["expectInput"] = expect_input
     return {"schema": "exocortex.telegram.response.v1", "actions": [action]}
 
 
@@ -179,6 +246,23 @@ def _category_buttons(command: str, extra: dict[str, Any] | None = None):
         for category in CATEGORIES
     ]
     return [buttons[:2], buttons[2:]]
+
+
+def _timer_keyboard() -> dict[str, Any]:
+    return {
+        "persistent": True,
+        "resize": True,
+        "placeholder": "Select the current category",
+        "rows": _category_buttons("press"),
+    }
+
+
+def _backfill_prompt(error: str | None = None) -> dict[str, Any]:
+    question = "How many recent minutes should become a completed session?"
+    return _message(
+        f"{error}\n{question}" if error else question,
+        expect_input={"command": "backfill_minutes", "expiresInSeconds": 300},
+    )
 
 
 class GryphonCommandService:
@@ -232,7 +316,7 @@ class GryphonCommandService:
         if command in {"start", "menu"}:
             return _message(
                 "Chronos is ready. Select a category to start or switch the timer.",
-                _category_buttons("press"),
+                reply_keyboard=_timer_keyboard(),
             )
         if command == "press":
             category = str(arguments.get("category") or "")
@@ -284,16 +368,12 @@ class GryphonCommandService:
             )
         if command == "backfill":
             raw = str(arguments.get("text") or "").strip()
-            try:
-                minutes = int(raw)
-            except ValueError as error:
-                raise ValueError("Use /chronos backfill MINUTES.") from error
-            if minutes < 1 or minutes > 10080:
-                raise ValueError("Minutes must be between 1 and 10080.")
-            return _message(
-                f"Choose the category for the completed {minutes}-minute session.",
-                _category_buttons("backfill_select", {"minutes": minutes}),
-            )
+            if not raw:
+                return _backfill_prompt()
+            return self._backfill_minutes(raw)
+        if command == "backfill_minutes":
+            raw = str(arguments.get("text") or "").strip()
+            return self._backfill_minutes(raw)
         if command == "backfill_select":
             minutes = int(arguments.get("minutes") or 0)
             result = await self.timers.backfill_completed(
@@ -317,8 +397,21 @@ class GryphonCommandService:
                 f"{active_text}"
             )
         return _message(
-            "Chronos commands: status, stats, week, month, stop, undo, "
-            "retype, backfill MINUTES."
+            "Chronos commands: /timer, /active, /today, /week, /month, "
+            "/stop, /undo, /retype, /backfill."
+        )
+
+    @staticmethod
+    def _backfill_minutes(raw: str) -> dict[str, Any]:
+        try:
+            minutes = int(raw)
+        except ValueError:
+            return _backfill_prompt("Minutes must be a whole number.")
+        if minutes < 1 or minutes > 10080:
+            return _backfill_prompt("Minutes must be between 1 and 10080.")
+        return _message(
+            f"Choose the category for the completed {minutes}-minute session.",
+            _category_buttons("backfill_select", {"minutes": minutes}),
         )
 
     async def period_message(self, period: str) -> str:
@@ -424,7 +517,7 @@ class ChronosNotificationSupervisor:
                     await self.notifier.send(
                         f"{active['label']} has been active for "
                         f"{format_duration(active['timer_elapsed_seconds'])}. "
-                        "Open /chronos for controls.",
+                        "Open /timer for controls.",
                         f"timer-reminder:{active['id']}",
                     )
                 except Exception:

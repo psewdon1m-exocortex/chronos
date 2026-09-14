@@ -66,9 +66,9 @@ const SECTIONS = [
     title: "Telegram",
     content: (
       <>
-        <p>Telegram transport and identity binding are owned by Gryphon. Initialize Gryphon and register a bot in Settings, then use <strong>Link Chronos function</strong> to select it. When the function is connected but no Telegram account is linked, <strong>Initialize bot</strong> creates a one-time <code>/link</code> challenge. The same card manages verified Gryphon Linux updates through Updater.</p>
+        <p>Telegram transport and identity binding are owned by Gryphon. Connect each bot on the server with <code>sudo gryphon bot connect ALIAS</code>, then use <strong>Link Chronos function</strong> in Settings to select it. When the function is connected but no Telegram account is linked, <strong>Initialize bot</strong> creates a one-time <code>/link</code> challenge. The same card manages verified Gryphon Linux updates through Updater.</p>
         <h3>Commands</h3>
-        <pre><code>{`/chronos status              active timer\n/chronos stats               today\n/chronos week                current week\n/chronos month               current month\n/chronos stop                stop active timer\n/chronos undo                undo last timer action\n/chronos retype              change the last completed session category\n/chronos backfill MINUTES    insert a completed session for the last N minutes`}</code></pre>
+        <pre><code>{`/timer                 open the persistent category controls\n/active                active timer\n/today                 today's totals\n/week                  current week\n/month                 current month\n/stop                  stop active timer\n/undo                  undo last timer action\n/retype                change the last completed session category\n/backfill [MINUTES]    add a completed session; prompts when MINUTES is omitted`}</code></pre>
         <p>Retyping offers the four fixed category buttons. Backfill asks for whole minutes, then a category. It inserts a completed session, trims or removes overlapped entries, and preserves any active timer with the overlapped time deducted.</p>
         <p>Long-timer reminders and the daily summary follow the timezone and schedule configured in Settings.</p>
       </>

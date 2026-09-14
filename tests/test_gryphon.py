@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any
@@ -7,7 +8,13 @@ from typing import Any
 import pytest
 
 from app.constants import CATEGORIES
-from app.gryphon import GryphonClient, GryphonCommandService, GryphonError, format_duration
+from app.gryphon import (
+    CHRONOS_COMMAND_CATALOG,
+    GryphonClient,
+    GryphonCommandService,
+    GryphonError,
+    format_duration,
+)
 from app.updater import UpdaterClient
 
 
@@ -73,12 +80,54 @@ def envelope(event_id: str, command: str, arguments: dict[str, Any] | None = Non
 
 
 @pytest.mark.asyncio
-async def test_start_returns_all_categories_as_neutral_callback_actions():
+async def test_timer_menu_returns_all_categories_as_persistent_keyboard_actions():
     service = GryphonCommandService(FakeStore(), FakeTimers())  # type: ignore[arg-type]
-    result = await service.handle(envelope("event-1", "start"))
-    buttons = [button for row in result["actions"][0]["buttons"] for button in row]
+    result = await service.handle(envelope("event-1", "menu"))
+    keyboard = result["actions"][0]["replyKeyboard"]
+    buttons = [button for row in keyboard["rows"] for button in row]
     assert [button["arguments"]["category"] for button in buttons] == list(CATEGORIES)
     assert all(button["command"] == "press" for button in buttons)
+    assert keyboard["persistent"] is True
+    assert keyboard["resize"] is True
+
+
+@pytest.mark.asyncio
+async def test_each_persistent_keyboard_button_reaches_the_timer_service():
+    timers = FakeTimers()
+    service = GryphonCommandService(FakeStore(), timers)  # type: ignore[arg-type]
+    for index, category in enumerate(CATEGORIES):
+        await service.handle(envelope(f"category-{index}", "press", {"category": category}))
+    assert timers.press_calls == list(CATEGORIES)
+
+
+@pytest.mark.asyncio
+async def test_backfill_supports_prompt_retry_and_one_line_fast_path():
+    service = GryphonCommandService(FakeStore(), FakeTimers())  # type: ignore[arg-type]
+
+    prompt = await service.handle(envelope("backfill-1", "backfill"))
+    assert prompt["actions"][0]["expectInput"] == {
+        "command": "backfill_minutes",
+        "expiresInSeconds": 300,
+    }
+
+    invalid = await service.handle(
+        envelope("backfill-2", "backfill_minutes", {"text": "many"})
+    )
+    assert invalid["actions"][0]["expectInput"]["command"] == "backfill_minutes"
+    assert "whole number" in invalid["actions"][0]["text"]
+
+    valid = await service.handle(
+        envelope("backfill-3", "backfill_minutes", {"text": "30"})
+    )
+    buttons = [button for row in valid["actions"][0]["buttons"] for button in row]
+    assert all(button["command"] == "backfill_select" for button in buttons)
+    assert all(button["arguments"]["minutes"] == 30 for button in buttons)
+
+    fast_path = await service.handle(
+        envelope("backfill-4", "backfill", {"text": "45"})
+    )
+    fast_buttons = [button for row in fast_path["actions"][0]["buttons"] for button in row]
+    assert all(button["arguments"]["minutes"] == 45 for button in fast_buttons)
 
 
 @pytest.mark.asyncio
@@ -123,6 +172,12 @@ async def test_service_client_validates_identity_and_uses_scoped_routes(monkeypa
 
     def request(method: str, route: str, body: dict[str, Any] | None = None):
         calls.append((method, route, body))
+        if route.endswith("command-catalog"):
+            return {
+                "schema": "exocortex.telegram.command-catalog.v1",
+                "serviceId": "chronos",
+                "commands": list(CHRONOS_COMMAND_CATALOG),
+            }
         if route.endswith("/bots"):
             return {
                 "schema": "exocortex.gryphon.service-bots.v1",
@@ -154,6 +209,14 @@ async def test_service_client_validates_identity_and_uses_scoped_routes(monkeypa
         ("GET", "/v1/service", None),
         ("GET", "/v1/service/bots", None),
         ("PUT", "/v1/service/connection", {"botId": "bot-1", "commandPrefix": "chronos", "adapterUrl": "http://chronos/api/internal/gryphon/command"}),
+        (
+            "PUT",
+            "/v1/service/command-catalog",
+            {
+                "schema": "exocortex.telegram.command-catalog.v1",
+                "commands": list(CHRONOS_COMMAND_CATALOG),
+            },
+        ),
         ("DELETE", "/v1/service/connection", None),
         ("POST", "/v1/service/notifications", {"text": "Summary", "idempotencyKey": "summary-2026-09-09"}),
     ]
@@ -172,6 +235,44 @@ async def test_service_client_rejects_cross_service_status(monkeypatch):
     })
     with pytest.raises(GryphonError, match="invalid service status"):
         await client.status()
+
+
+@pytest.mark.asyncio
+async def test_command_catalog_retries_without_blocking_startup(monkeypatch):
+    client = GryphonClient("/run/gryphon/client.sock", Path("unused.token"), 1)
+    status_calls = 0
+    sync_calls = 0
+
+    async def status():
+        nonlocal status_calls
+        status_calls += 1
+        if status_calls == 1:
+            raise GryphonError("temporarily unavailable", 503)
+        return {"connected": True}
+
+    async def sync():
+        nonlocal sync_calls
+        sync_calls += 1
+        return {"commands": []}
+
+    async def sleep(_: float):
+        if sync_calls:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(client, "status", status)
+    monkeypatch.setattr(client, "sync_command_catalog", sync)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await client.maintain_command_catalog(retry_seconds=0)
+    assert status_calls == 2
+    assert sync_calls == 1
+
+
+def test_command_catalog_comparison_ignores_gryphon_sort_order():
+    assert GryphonClient._command_catalog_is_current({
+        "commands": list(reversed(CHRONOS_COMMAND_CATALOG)),
+    }) is True
 
 
 @pytest.mark.asyncio

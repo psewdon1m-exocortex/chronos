@@ -105,7 +105,7 @@ def load_config() -> RuntimeConfig:
         session_secret=os.getenv("CHRONOS_SESSION_SECRET", ""),
         cookie_secure=_boolean("CHRONOS_COOKIE_SECURE", True),
         trust_proxy=_boolean("CHRONOS_TRUST_PROXY", True),
-        version=os.getenv("CHRONOS_VERSION", "0.1.0"),
+        version=os.getenv("CHRONOS_VERSION", "0.1.1"),
         data_dir=data_dir,
         default_timezone=os.getenv("TZ", "UTC"),
         kernel_url=os.getenv("KERNEL_URL", "").strip(),
