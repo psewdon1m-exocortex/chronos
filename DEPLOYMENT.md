@@ -23,6 +23,12 @@ curl -fsS http://127.0.0.1:18280/api/health
 
 Fill only CHRONOS_ACCESS_KEY, KERNEL_URL (canonical HTTPS origin), and KERNEL_SERVICE_TOKEN (the scoped machine credential issued for this head). Bootstrap supplies the immutable image digest, local session secret and helper control/export credentials. Do not copy another service's .env or release private key. The installer generates the actual Docker gateway proxy addresses; there is no operator IP allowlist or wildcard proxy trust.
 
+CHRONOS_ACCESS_KEY must be explicitly present but has no length, composition,
+character-set, URL-safe/ASCII, strength/entropy or value-denylist policy. Every
+supported path must preserve the exact operator-supplied value. The current
+12-character validation and whitespace stripping are a documented `BST-13`
+implementation gap, not deployment requirements.
+
 Bootstrap has no arguments. It rejects a mismatched signature, version, digest, unsafe tar member, foreign existing trust key or existing installation. After an interrupted staging, inspect the fixed target before removing only a newly created incomplete directory; an established deployment must be updated through its authenticated Updater. Re-running prepare/install preserves operator values. An update merges missing safe defaults; rollback restores the exact previous .env and deployment plus the supplied data backup.
 
 ## Volt values and Kernel bindings

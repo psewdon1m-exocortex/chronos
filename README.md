@@ -138,6 +138,18 @@ public-authenticated profile. Do not add `OPERATOR_CIDR`, a VPN prerequisite or
 a source-IP allow-list. The Access Key and bounded Chronos session protect all
 operator data and API routes.
 
+`CHRONOS_ACCESS_KEY` is a required, explicitly supplied opaque exact value, not
+a password governed by a strength policy. It has no minimum/maximum length,
+required or forbidden characters, URL-safe/ASCII restriction, entropy check or
+known/example/placeholder denylist. Bootstrap, login, rotation and restore must
+not trim, normalize, fold case or truncate it; only missing configuration is
+invalid.
+
+> Implementation gap (2026-09-14): the current installer and runtime require at
+> least 12 characters, the change endpoint repeats that minimum and startup
+> strips surrounding whitespace. These behaviors violate shared issue `BST-13`
+> and block the next production release until code and tests are corrected.
+
 ## Required environment keys
 
 - `KERNEL_URL`
