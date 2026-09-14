@@ -24,3 +24,7 @@ playwright-report/
 Thumbs.db
 .vscode/
 
+
+# Generated CI evidence; reports are uploaded as artifacts.
+.release-evidence/
+known-problems-report.json

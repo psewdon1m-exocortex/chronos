@@ -131,6 +131,16 @@ class UpdaterClient:
             300,
         )
 
+    async def check_neptune(self, current_version: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self._request, "POST", "/v1/components/neptune-linux/check",
+            {"head_id": self.head_id, "current_version": current_version}, True, 30)
+
+    async def lifecycle(self, kind: str, **fields: str) -> dict[str, Any]:
+        if kind not in {"gryphon-initialization", "gryphon-bot", "updater-self-update"}:
+            raise UpdaterError("Unsupported lifecycle operation", 400)
+        return await asyncio.to_thread(self._request, "POST", f"/v1/lifecycle/{kind}",
+            {"head_id": self.head_id, **fields}, True, 30)
+
     async def initialize_neptune(self, enrollment_code: str, export_url: str) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._request,
@@ -169,7 +179,7 @@ class UpdaterClient:
 
     async def job(self, job_id: str) -> dict[str, Any]:
         return await asyncio.to_thread(
-            self._request, "GET", f"/v1/jobs/{quote(job_id, safe='')}"
+            self._request, "GET", f"/v1/jobs/{quote(job_id, safe='')}", None, True
         )
 
     async def rollback(self, job_id: str) -> dict[str, Any]:

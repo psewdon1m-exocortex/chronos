@@ -187,6 +187,10 @@ class GryphonCommandService:
         self.timers = timers
 
     async def handle(self, envelope: dict[str, Any]) -> dict[str, Any]:
+        async with self.store.pool.command():
+            return await self._handle(envelope)
+
+    async def _handle(self, envelope: dict[str, Any]) -> dict[str, Any]:
         if envelope.get("schema") != "exocortex.telegram.command.v1":
             raise ValueError("Unsupported Gryphon command schema")
         if envelope.get("serviceId") != "chronos":

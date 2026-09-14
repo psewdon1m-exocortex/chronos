@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import os
 from pathlib import Path
-import shutil
 import time
 from typing import Any
 
@@ -94,12 +93,13 @@ class TelemetrySampler:
             else None
         )
         try:
-            disk = shutil.disk_usage(self.data_dir)
-            disk_used = disk.used
-            disk_total = disk.total
-            disk_percent = disk.used / disk.total * 100 if disk.total else None
-        except OSError:
-            disk_used = disk_total = disk_percent = None
+            disk = os.statvfs(self.data_dir)
+            disk_total = disk.f_blocks * disk.f_frsize
+            disk_available = disk.f_bavail * disk.f_frsize
+            disk_used = max(0, disk_total - disk_available)
+            disk_percent = disk_used / disk_total * 100 if disk_total else None
+        except (OSError, AttributeError):
+            disk_used = disk_total = disk_percent = disk_available = None
 
         return {
             "captured_at": time.time(),
@@ -113,6 +113,7 @@ class TelemetrySampler:
                 "percent": disk_percent,
                 "used_bytes": disk_used,
                 "total_bytes": disk_total,
+                "available_bytes": disk_available,
                 "scope": str(self.data_dir),
             },
             "uptime_seconds": max(0, int(now - self.started_at)),

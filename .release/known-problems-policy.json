@@ -1,0 +1,607 @@
+{
+  "schema_version": 1,
+  "service": "chronos",
+  "catalog_revision": "a93d9f301531ac36ea9f94d4be3c4bc712254a21",
+  "catalog_sha256": "b0b164a350d196abf30d7664ec438f90b469c302dac5ba45a7604d77e28a02a8",
+  "remote_path": "PART_12_KNOWN_DEPLOYMENT_AND_OPERATIONS_PROBLEMS.md",
+  "active_ids": 88,
+  "checks": {
+    "REL-01": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Разделить CI и release workflow по триггерам и полномочиям. Обычный push только проверяет код; публикация разрешена только service-qualified тегу после успешных обязательных проверок."
+    },
+    "REL-02": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Использовать единый формат `<service>-v<semver>` и валидировать его в workflow и bootstrap."
+    },
+    "REL-03": {
+      "cases": [
+        "published-assets"
+      ],
+      "scope": "Перед публикацией проверять, что tag commit равен ожидаемому commit основной ветки; после публикации повторять проверку через удалённый API или `git ls-remote`.",
+      "phase": "final"
+    },
+    "REL-04": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Назначить один источник версии и добавить CI-проверку всех производных значений до сборки и публикации."
+    },
+    "REL-05": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Продвигать один и тот же immutable artifact или воспроизводимо сверять exact digest между CI и релизом."
+    },
+    "REL-06": {
+      "cases": [
+        "published-assets"
+      ],
+      "scope": "Формировать комплект атомарно и проверять соответствие архива, manifest, checksum и подписи перед публикацией и после скачивания.",
+      "phase": "final"
+    },
+    "REL-07": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Публиковать bootstrap как asset конкретного immutable тега и использовать версионированный URL."
+    },
+    "REL-08": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Явно указывать минимальные совместимые версии в манифесте, проверять dependency graph и соблюдать порядок релизов."
+    },
+    "REL-09": {
+      "cases": [
+        "published-assets"
+      ],
+      "scope": "После публикации выполнять проверку полного перечня assets, HTTP-доступности и криптографической верификации из чистого окружения.",
+      "phase": "final"
+    },
+    "REL-10": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "В публикуемой документации использовать самостоятельные стабильные URL либо включать целевой документ в тот же артефакт; запускать link/check gates в изолированном checkout."
+    },
+    "BST-01": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "У каждого сервиса должен быть собственный bootstrap, каталог, `.env`, installer и rollback. Общей может быть только явно выделенная серверная инфраструктура."
+    },
+    "BST-02": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Получать межсервисные credentials через формальный enrollment/bootstrap-протокол; чужие env-файлы не читать."
+    },
+    "BST-03": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Встроить допустимый публичный trust anchor в версионированный bootstrap и сохранить его с проверенными правами до проверки manifest."
+    },
+    "BST-04": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Разделить immutable release payload, persistent trust и operator state; обновлять их по явным правилам и атомарно."
+    },
+    "BST-05": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Делать schema-aware merge: сохранять операторские значения, добавлять новые defaults/generated fields и удалять только явно устаревшие поля."
+    },
+    "BST-06": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Маркировать происхождение полей и никогда не заменять operator-owned значения без явного подтверждения или миграционного правила."
+    },
+    "BST-07": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Разделить профили окружений. Production validation должна требовать только параметры активных production-функций."
+    },
+    "BST-08": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Явно разделить operator-chosen и machine-generated secrets; пользовательский access key принимать в `.env`, остальные секреты создавать автоматически."
+    },
+    "BST-09": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Разделить `bootstrap`, `install`, `refresh` и `repair`; повторный запуск должен сохранять корректное состояние и явно сообщать о конфликте."
+    },
+    "BST-10": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Проверять итоговую compose-конфигурацию и запускать validator в том же mount/user-контексте, что и приложение."
+    },
+    "BST-11": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Валидировать placeholders, пустые значения, URL, fingerprint, домены и конфликтующие порты до любых изменений runtime."
+    },
+    "BST-12": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Завершать bootstrap точным путём к `.env`, перечнем operator inputs и одной локальной командой install/validate/status."
+    },
+    "TRUST-01": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Создавать независимые ключевые пары для release signing, storage access, service enrollment и других назначений."
+    },
+    "TRUST-02": {
+      "not_applicable": "This head has no SFTP/SSH client or host-key trust store. All off-host backup storage transport and its fingerprint validation belong to Saturn/Neptune; the head exports only to the local scoped agent.",
+      "paths": [
+        "compose.production.yaml",
+        "app/neptune.py"
+      ],
+      "scope": "chronos head ownership; external dependency tests remain separate"
+    },
+    "TRUST-03": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Доставлять корневой публичный ключ независимо: встроить в доверенный bootstrap или заранее установить через отдельный канал."
+    },
+    "TRUST-04": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Передавать секрет через root-owned файл, stdin или secret mount; редактировать вывод и исключать секретные значения из командной строки."
+    },
+    "TRUST-05": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Использовать одноразовый enrollment, атомарную запись токена, явную ротацию и подтверждение, что consumer перечитал новый secret."
+    },
+    "TRUST-06": {
+      "cases": [
+        "published-assets"
+      ],
+      "scope": "Installer обязан локально проверить цепочку доверия до распаковки и запуска; CI дополнительно проверяет опубликованный комплект извне.",
+      "phase": "final"
+    },
+    "PERM-01": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Выполнять `chmod` до `chown` либо менять оба атрибута из процесса с необходимыми полномочиями; закрепить порядок тестом."
+    },
+    "PERM-02": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Запускать validate, migrate, smoke и storage bootstrap с теми же UID:GID и mount-ограничениями, что и runtime, кроме узких root-init операций."
+    },
+    "PERM-03": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "После создания явно выставлять ожидаемые owner, group и mode; не полагаться на requested mode при неизвестном umask."
+    },
+    "PERM-04": {
+      "not_applicable": "This head has one application UID owning its persistent data volume. It does not create files in shared operational directories; the installer creates group-scoped token files as root and agents own shared sockets.",
+      "paths": [
+        "compose.production.yaml",
+        "app/neptune.py"
+      ],
+      "scope": "chronos head ownership; external dependency tests remain separate"
+    },
+    "PERM-05": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Определить минимальную service group, использовать `0640`/`0750` или более строгие режимы и проверять отсутствие доступа у постороннего UID."
+    },
+    "PERM-06": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Валидировать regular file, отсутствие symlink, точного владельца/группу, допустимый mode и безопасную цепочку родительских каталогов."
+    },
+    "PERM-07": {
+      "cases": [
+        "bootstrap",
+        "deployment"
+      ],
+      "scope": "Проверять execute/search permission всей цепочки пути и воспроизводить чтение от реального runtime UID."
+    },
+    "CTR-01": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Проверять rendered Compose config и host socket; публиковать только требуемый порт на `127.0.0.1`."
+    },
+    "CTR-02": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "После атомарной замены целево пересоздавать только потребляющие сервисы и проверять новый credential из их runtime-контекста."
+    },
+    "CTR-03": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Для одноразовых проверок применять `--no-deps`, явный `--user` и минимальные capabilities; отделять read-only probe от миграции."
+    },
+    "CTR-04": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "В production pin-ить images по immutable digest и хранить digest в release manifest/environment lock."
+    },
+    "CTR-05": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Описать readiness gates и выполнять targeted recreate с ожиданием healthy перед переключением трафика."
+    },
+    "CTR-06": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Разделять process liveness, application readiness, host-loopback и public-edge проверки."
+    },
+    "CTR-07": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Проверять `docker compose config` как фактический источник истины и тестировать обязательные variables/mounts/ports до `up`."
+    },
+    "NET-01": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Создать fail-closed default server и отдельный vhost для каждого canonical host; неизвестные Host/SNI отклонять."
+    },
+    "NET-02": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Оставить один server-managed Nginx; installers публикуют только loopback endpoints и документируют требуемый vhost."
+    },
+    "NET-03": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Единый Nginx допустим, но конфигурацию делить на независимые vhost-файлы с общей включаемой baseline-конфигурацией."
+    },
+    "NET-04": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Передавать корректные `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, при необходимости `X-Forwarded-Port`; настроить доверие только к своему proxy."
+    },
+    "NET-05": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Нормализовать origin, хранить один canonical HTTPS URL и проверять реальный `Origin`/forwarded headers интеграционным тестом через proxy."
+    },
+    "NET-06": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Публиковать host ports только на `127.0.0.1`; снаружи разрешать лишь 80/443 и необходимые административные каналы."
+    },
+    "NET-07": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Отдельно проверить и документировать egress для DNS, release registry, межсервисного HTTPS и storage transport."
+    },
+    "NET-08": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Привязать каждый `server_name` к точным `fullchain.pem`/`privkey.pem`, выполнить `nginx -t` и внешнюю SNI-проверку каждого домена."
+    },
+    "NET-09": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Назначать лимиты по маршрутам: большой только для upload, малый и ограниченный для API/auth; проверять ожидаемый `413`."
+    },
+    "NET-10": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Для streaming upload настроить buffering, timeouts и temp quota осознанно; отделить upload path и контролировать ресурсы."
+    },
+    "NET-11": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Установить route-specific connect/read/send timeouts и проектировать длительные операции как асинхронные или возобновляемые."
+    },
+    "NET-12": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Использовать стабильные root-relative asset paths, включить assets в образ и отдельно проверить HTML logo, favicon, manifest и deep-link routes."
+    },
+    "HLT-01": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Утвердить общий status contract: какие проверки обязательны, как агрегируются состояния и когда данные считаются stale."
+    },
+    "HLT-02": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Показывать отдельно process/live, dependency/readiness и edge/TLS; не заменять одно измерение другим."
+    },
+    "HLT-03": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Версионировать health contract и хранить endpoint/schema в registry; добавить consumer-driven contract test."
+    },
+    "HLT-04": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Представлять unknown/stale отдельно от числового нуля и показывать время последнего успешного измерения."
+    },
+    "HLT-05": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Считать service uptime монотонно от запуска текущего operator-facing process/container instance и сбрасывать при его перезапуске. Иные uptime показывать только как отдельно подписанные дополнительные метрики."
+    },
+    "HLT-06": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Включать в telemetry schema источник, единицы и scope; UI обязан показывать их явно."
+    },
+    "HLT-07": {
+      "not_applicable": "Direct SFTP storage credentials, roots and read/write/delete capability probes belong to Saturn. This head validates its own database and local data, and reports agent status separately.",
+      "paths": [
+        "compose.production.yaml",
+        "app/neptune.py"
+      ],
+      "scope": "chronos head ownership; external dependency tests remain separate"
+    },
+    "HLT-08": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Нормализовать категории ошибок, логировать безопасные технические детали и показывать оператору actionable причину без секрета."
+    },
+    "HLT-09": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Включить критические зависимости в readiness и открывать трафик только после подтверждения итогового runtime-состояния."
+    },
+    "HLT-10": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Вызывать `statvfs` для filesystem с authoritative service data, считать `available_bytes = f_bavail * f_frsize` и заполненность из `total - available`; reserved blocks, недоступные service UID, считаются недоступными."
+    },
+    "INT-01": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Разделять installed, registered, enrolled, authenticated, last-seen и schedule-applied; завершать workflow проверкой каждого состояния."
+    },
+    "INT-02": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Описать issuer, audience, holder и направление каждого токена; использовать разные имена для разных ролей."
+    },
+    "INT-03": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Типизировать codes по pipeline и identity, показывать срок жизни и single-use, после потребления выдавать новый код только через явный action."
+    },
+    "INT-04": {
+      "not_applicable": "This head supplies one archive pipeline. It does not issue pipeline identities or own uniqueness constraints; Saturn issues an enrollment and Neptune stores the returned project-specific identity.",
+      "paths": [
+        "compose.production.yaml",
+        "app/neptune.py"
+      ],
+      "scope": "chronos head ownership; external dependency tests remain separate"
+    },
+    "INT-05": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Определить полный lifecycle: active → revoked/archived; фильтровать UI, отключать credentials и разрешать безопасную реактивацию либо новую identity."
+    },
+    "INT-06": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Писать secret атомарно, выставлять права, пересоздавать конкретного consumer и проверять authenticated request изнутри runtime."
+    },
+    "INT-07": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Выполнить явную миграцию каждого значения на typed secret reference, проверить позиции/идентификаторы и только затем включать публикацию."
+    },
+    "INT-08": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Определить authoritative registry, версии и правила распространения; UI не должен угадывать endpoint из DNS или соседнего `.env`."
+    },
+    "DATA-01": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Использовать потоковую передачу с bounded buffers и backpressure; тестировать параллельно большую загрузку и обычные dashboard-запросы."
+    },
+    "DATA-02": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Стримить в целевое хранилище либо выделять ограниченный staging volume с quota, мониторингом и очисткой незавершённых файлов."
+    },
+    "DATA-03": {
+      "not_applicable": "Resumable transfer sessions, upload TTL and remote object commit belong to Neptune/Saturn. The head accepts bounded authenticated local import requests and creates a checksummed export.",
+      "paths": [
+        "compose.production.yaml",
+        "app/neptune.py"
+      ],
+      "scope": "chronos head ownership; external dependency tests remain separate"
+    },
+    "DATA-04": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Возвращать успех только после подтверждённой финализации; хранить состояние и проверять размер/digest."
+    },
+    "DATA-05": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Выполнять малую end-to-end canary operation в выделенном probe namespace и безопасно удалять тестовый объект."
+    },
+    "DATA-06": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Проводить автоматическую structural verification и регулярный restore drill в изолированном окружении."
+    },
+    "DATA-07": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Назначать отдельные immutable namespace по проекту, deployment и pipeline; запрещать выход за root."
+    },
+    "DATA-08": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Выдавать отдельные scoped credentials для export, control и archive operations; поддерживать независимую ротацию и revoke."
+    },
+    "DATA-09": {
+      "cases": [
+        "unit",
+        "deployment",
+        "helper-contract"
+      ],
+      "scope": "Показывать last seen, last successful backup, next due и overdue отдельно; alert строить по факту артефакта, а не только по сохранённому schedule."
+    },
+    "DATA-10": {
+      "cases": [
+        "unit",
+        "deployment"
+      ],
+      "scope": "Определять независимость технически: отдельные credentials, storage/account/failure domain и проверяемый replication/restore path."
+    },
+    "OPS-01": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Перед изменениями фиксировать hostname, `pwd`, release version и target paths; команды в runbook должны явно указывать место запуска."
+    },
+    "OPS-02": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Публиковать исполняемые команды в чистых fenced code blocks и перед запуском проверять визуально значимые символы."
+    },
+    "OPS-03": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Каждому workaround назначать issue/ID, условие удаления и заменять runbook после выпуска исправленной версии."
+    },
+    "OPS-04": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Использовать короткий post-change checklist: config render, migration, readiness, authenticated integration, public edge и rollback metadata."
+    },
+    "OPS-05": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "В incident bundle включать UTC time, host, release, image digest, container state, relevant logs и точную команду/endpoint без секретов."
+    },
+    "OPS-06": {
+      "cases": [
+        "deployment"
+      ],
+      "scope": "Считать инцидент закрытым только после устранения root cause, добавления regression check и обновления bootstrap/runbook/этой базы."
+    }
+  }
+}

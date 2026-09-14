@@ -16,9 +16,17 @@ SEO/GEO checks to intentionally public/indexable surfaces and concealment,
 crawler and probe-resistance checks to private or authenticated surfaces.
 Every area requires `PASS` evidence or a reasoned `N/A`.
 
+## Required pre-release known-problem gate
+
+Before a service-qualified release is finalized, evaluate every active ID in
+[Part 12](https://github.com/psewdon1m-exocortex/general/blob/main/PART_12_KNOWN_DEPLOYMENT_AND_OPERATIONS_PROBLEMS.md) against the exact candidate. Retain
+`known-problems-report.json` bound to the service revision, qualified tag,
+immutable central-documentation revision and catalog digest. Missing, stale,
+failed, unknown or unsupported `N/A` evidence blocks publication. The workflow enforces separate pre-signing and final phases. See [DEPLOYMENT.md](DEPLOYMENT.md) for the current release order and operator activation checks.
+
 ## Автоматические резервные копии
 
-После обычной установки создайте в Saturn одноразовый Neptune setup code. Если локальный Neptune уже установлен, но Chronos ещё не связан с ним, откройте Settings → Backup, нажмите **Initialize Neptune** и введите код. Команда `sudo chronos-install backup` остаётся способом установить отсутствующий агент и резервным CLI-сценарием. Расписание задаётся в Saturn → Synchronization.
+После обычной установки создайте в Saturn одноразовый Neptune setup code. Откройте Settings → Backup, нажмите **Initialize Neptune** и введите код. Интерфейс устанавливает отсутствующий агент или подключает существующий; `sudo chronos-install backup` остаётся эквивалентным CLI-сценарием. Расписание задаётся в Saturn → Synchronization.
 
 Chronos is a single-operator time-tracking service for the Exocortex ecosystem.
 
@@ -46,7 +54,7 @@ Chronos runs in three modes:
   - stable public IDs such as `t-00000001`
   - delete and restore entries
 - Analytics by day and period, including percentage splits.
-- Full backup and restore flow using JSON archive.
+- Manifest-verified ZIP backup and restore with legacy JSON import.
 - Release status + restore flow through Updater.
 
 ## Stack
@@ -83,17 +91,14 @@ Chronos follows SemVer from the initial `0.0.1`. A plain `v0.0.1`-style tag
 runs verification-only CI and cannot publish or mutate a release. Only
 `chronos-vMAJOR.MINOR.PATCH` starts the protected Chronos release workflow.
 
-> Current implementation gap (2026-09-13): `ci.yml` does not yet listen to
-> plain `v*` tags, and the release workflow does not yet sign the manifest or
-> build an exact-version bootstrap with the embedded public key described
-> below. This is a material Part 04/05 divergence and blocks the next release
-> until a separate CI/code change is implemented and verified.
+> The next source release implements signed exact-version bootstrap, Access Key
+> sessions and typed head profiles. Previously published assets remain unchanged;
+> use this flow only after the new qualified release passes CI.
 
 ## Production target
 
-The following is the required Part 04 procedure, not proof that the current
-release artifacts already satisfy it. Do not use it until the release gap
-recorded above is closed and verified.
+The following procedure applies to the next qualified release; see
+[DEPLOYMENT.md](DEPLOYMENT.md) for its exact version and required bindings.
 
 Bootstrap one explicit immutable Chronos release (replace `X.Y.Z`), edit only
 Chronos's own mode-`0600` `.env`, then use `compose.production.yaml`:
@@ -102,7 +107,7 @@ Chronos's own mode-`0600` `.env`, then use `compose.production.yaml`:
 curl -fsSL https://github.com/psewdon1m-exocortex/chronos/releases/download/chronos-vX.Y.Z/bootstrap.sh | sudo sh
 ```
 
-Required target release contract (subject to the implementation gap above):
+Release contract:
 release CI keeps Chronos's private release-signing key in GitHub Secrets and
 embeds only its derived public counterpart in this versioned bootstrap. The
 bootstrap creates `/etc/exocortex/release-trust/chronos.pem`, verifies the
@@ -147,34 +152,22 @@ operator data and API routes.
 
 ## Kernel Register contract
 
-Chronos expects every present Register value below to be a strict
-`volt://<entry-id>/<field-id>` reference:
-- `repositories.chronos.url` or `services.chronos.url`
-- `services.chronos.sni` (domain binding)
-
-The watcher batch-resolves the relevant keys through Kernel and applies the
-returned values live without persisting them.
+Chronos requires the additive typed profile in [app/deployment-profile.json](app/deployment-profile.json). All values use numeric Volt field references and are resolved only through Kernel. Required bindings and the operator sequence are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Updater contract
 
-1. `GET /api/admin/repository` - repository status
-2. `POST /api/admin/update` - create update request
-3. `POST /api/internal/updater/restore` - restore on deploy result
-
-Restore header: `X-Updater-Token`.
+- GET /api/updates/status and POST /api/updates/check.
+- POST /api/updates/apply; authenticated GET /api/updates/jobs/{job_id}.
+- POST /api/internal/updater/restore is a token-protected host-local callback.
 
 ## Main API
 
-- `POST /api/admin/auth`
-- `GET /api/timers/active`
-- `POST /api/timers/start`
-- `POST /api/timers/stop`
-- `DELETE /api/timers/active`
-- `GET /api/timers/history`
-- `POST /api/settings`
-- `GET /api/settings`
-- `GET /api/analytics/overview`
-- `GET /api/health`
+- POST /api/auth/login and /api/auth/logout.
+- GET /api/dashboard; POST /api/timer/press and /api/timer/stop.
+- GET/POST /api/sessions; PUT/DELETE /api/sessions/{id}.
+- POST /api/actions/undo; GET/PUT /api/settings.
+- GET /api/analytics and /api/export.csv.
+- GET /api/health (core readiness); authenticated GET /api/ready (dependencies).
 
 ## Gryphon / Telegram behavior
 
@@ -183,11 +176,11 @@ Restore header: `X-Updater-Token`.
 - Command flow: start/stop by category, quick summary, retype the last completed
   session with `/chronos retype`, and insert a completed recent session with
   `/chronos backfill MINUTES`.
-- Chronos exposes `POST /api/internal/gryphon/command`; the endpoint accepts
+- Chronos exposes `POST /internal/gryphon/command`; the endpoint accepts
   only the bearer token shared when the service connection is created.
-- Connect one or more bot tokens with `gryphon bot connect`, then use **Link
+- Register a bot in Settings (or `gryphon bot connect`), then use **Link
   Chronos function** in the Bot connection Settings card to select one of those
-  bots. Chronos receives only its service credential and never sees a bot token.
+  bots. A submitted bot token is forwarded once and never persisted by Chronos.
 - When a bot function is connected but no Telegram user is bound, **Initialize
   bot** in Settings creates a one-time `/link CODE` challenge. Send that command
   in a private chat with the selected bot. `gryphon link issue chronos` remains

@@ -54,6 +54,7 @@ class RuntimeConfig:
     gryphon_socket_path: str
     gryphon_adapter_url: str
     gryphon_timeout_seconds: float
+    storage_path: Path | None = None
 
     def with_register(
         self,
@@ -93,6 +94,7 @@ def load_config() -> RuntimeConfig:
         name = os.getenv("DB_NAME", "chronos")
         database_url = f"postgresql://{user}:{password}@{host}:{port}/{name}"
     return RuntimeConfig(
+        storage_path=Path(os.getenv("CHRONOS_STORAGE_PATH", str(data_dir))).resolve(),
         listen_port=_integer("CHRONOS_LISTEN_PORT", 18280),
         database_url=database_url,
         admin_username=os.getenv("CHRONOS_ADMIN_USERNAME", "operator") or "operator",
@@ -142,7 +144,7 @@ def load_config() -> RuntimeConfig:
         gryphon_socket_path=os.getenv("GRYPHON_SOCKET_PATH", "/run/gryphon/client.sock"),
         gryphon_adapter_url=os.getenv(
             "GRYPHON_ADAPTER_URL",
-            "http://chronos:18280/api/internal/gryphon/command",
+            "",
         ),
         gryphon_timeout_seconds=float(os.getenv("GRYPHON_TIMEOUT_SEC", "5")),
     )

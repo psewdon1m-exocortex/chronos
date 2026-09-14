@@ -7,18 +7,25 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
 
-FROM python:3.12-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2 AS runtime
+FROM python:3.12-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS runtime
 
+ARG CHRONOS_VERSION=0.1.0
+ENV CHRONOS_VERSION=$CHRONOS_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CHRONOS_DATA_DIR=/app/data
 WORKDIR /app
 
+# Security updates are applied once to the candidate; release promotion reuses
+# that exact tested image digest and its SBOM, without rebuilding it.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 10001 chronos \
     && useradd --system --uid 10001 --gid chronos --home-dir /app chronos
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY app app
 COPY infrastructure/migrations infrastructure/migrations

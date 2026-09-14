@@ -43,21 +43,6 @@ random_hex() {
   openssl rand -hex "$1"
 }
 
-copy_local_kernel_bootstrap() {
-  kernel_env=/opt/exocortex/kernel/.env
-  [ -r "$kernel_env" ] || return 0
-  current_url=$(get_env KERNEL_URL)
-  current_token=$(get_env KERNEL_SERVICE_TOKEN)
-  case "$current_url" in ""|CHANGE_ME|*CHANGE_ME*)
-    local_url=$(get_env_from "$kernel_env" KERNEL_URL)
-    [ -n "$local_url" ] && set_env KERNEL_URL "$local_url"
-  ;; esac
-  case "$current_token" in ""|CHANGE_ME|*CHANGE_ME*)
-    local_token=$(get_env_from "$kernel_env" KERNEL_SERVICE_TOKEN)
-    [ -n "$local_token" ] && set_env KERNEL_SERVICE_TOKEN "$local_token"
-  ;; esac
-}
-
 install_command() {
   install -d -m 0755 /usr/local/sbin
   wrapper=/usr/local/sbin/chronos-install
@@ -134,7 +119,6 @@ prepare() {
   set_env UPDATER_COMPOSE_PROJECT_DIR "$INSTALL_DIR"
   [ -z "${CHRONOS_RELEASE_VERSION:-}" ] || set_env CHRONOS_VERSION "$CHRONOS_RELEASE_VERSION"
   [ -z "${CHRONOS_RELEASE_IMAGE:-}" ] || set_env CHRONOS_IMAGE "$CHRONOS_RELEASE_IMAGE"
-  copy_local_kernel_bootstrap
   prepare_neptune_mounts
   prepare_gryphon_mounts
   install_command
@@ -181,6 +165,17 @@ install_chronos() {
   cd "$INSTALL_DIR"
   "$INSTALL_DIR/updater/install.sh" chronos "$ENV_FILE" "$INSTALL_DIR/updater/updater-linux-amd64"
   docker compose --env-file "$ENV_FILE" -f compose.production.yaml config -q
+  docker compose --env-file "$ENV_FILE" -f compose.production.yaml create
+  container=$(docker compose --env-file "$ENV_FILE" -f compose.production.yaml ps -aq chronos)
+  # A created (not started) container has no assigned Gateway yet.
+  # Network IPAM is authoritative and already exists after compose create.
+  networks=$(docker inspect --format '{{range $name, $value := .NetworkSettings.Networks}}{{$name}} {{end}}' "$container")
+  gateways=""
+  for network in $networks; do
+    gateways="$gateways$(docker network inspect --format '{{range .IPAM.Config}}{{if .Gateway}},{{.Gateway}}{{end}}{{end}}' "$network")"
+  done
+  [ -n "$gateways" ] || { echo "Cannot determine the host proxy address." >&2; exit 15; }
+  set_env CHRONOS_TRUSTED_PROXY_IPS "127.0.0.1,::1$gateways"
   docker compose --env-file "$ENV_FILE" -f compose.production.yaml up -d
   port=$(get_env CHRONOS_LISTEN_PORT)
   port=${port:-18280}
@@ -205,6 +200,9 @@ case "$ACTION" in
     require_root
     cd "$INSTALL_DIR"
     docker compose --env-file "$ENV_FILE" -f compose.production.yaml ps
+    port=$(get_env CHRONOS_LISTEN_PORT)
+    curl -fsS --max-time 5 "http://127.0.0.1:${port:-18280}/api/health"
+    echo '\nCore readiness checked. Verify connected agents in Settings and public TLS after nginx setup.'
   ;;
   backup) enable_backup ;;
   *) echo "Usage: chronos-install [install|prepare|status|backup]" >&2; exit 2 ;;

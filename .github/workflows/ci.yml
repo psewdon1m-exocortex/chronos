@@ -5,6 +5,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -50,9 +51,9 @@ jobs:
           TEST_DATABASE_URL: postgresql://chronos:test-database-password@127.0.0.1:5432/chronos_test
         run: |
           sh -n bootstrap.sh install.sh
-          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-dev.lock
           python -m pip check
-          PYTHONPATH=. pytest
+          PYTHONPATH=. python3 scripts/known-problems-gate.py --record unit --command pytest
       - name: Web and Documentation verification
         working-directory: web
         run: |
@@ -60,6 +61,24 @@ jobs:
           pnpm test
           pnpm build
           pnpm audit --prod --audit-level high
+
+      - name: Verify deployment, synthetic signed bootstrap and Part 12 structure
+        run: |
+          python3 scripts/test-known-problems-gate.py
+          python3 scripts/known-problems-gate.py --record deployment --command python3 scripts/test-deployment-contract.py
+          python3 scripts/known-problems-gate.py --record bootstrap --command docker run --rm -v "$PWD:/src:ro" -w /src node:24-bookworm python3 scripts/test-bootstrap.py
+          python3 scripts/known-problems-gate.py --phase structure
+      - name: Preserve current-revision Part 12 evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chronos-policy-${{ github.sha }}
+          path: |
+            .release-evidence/
+            known-problems-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
   pre-push-gate:
     name: Pre-push gate

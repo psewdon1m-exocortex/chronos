@@ -591,7 +591,8 @@ pre {
 @media (max-width: 720px) {
   .sidebar-activation { display: none; }
   .sidebar-fixed .sidebar { transform: translateX(-100%); }
-  .sidebar.is-open { transform: translateX(0); }
+  .sidebar.is-open { transform: translateX(-100%); }
+  .sidebar.mobile-open, .sidebar-fixed .sidebar.mobile-open { transform: translateX(0); }
   .sidebar-backdrop { position: fixed; z-index: 95; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: rgb(0 0 0 / 55%); }
   .app-content, .sidebar-fixed .app-content { margin-left: 0; }
   .page-header { height: 96px; padding: 0 20px; }
@@ -619,7 +620,7 @@ pre {
   .timeline-duration { display: none; }
   .row-actions { grid-column: 2 / -1; }
   .accent-row { grid-template-columns: 40px minmax(0, 1fr); }
-  .accent-row button { grid-column: span 1; }
+  .accent-row button { grid-column: 1 / -1; }
   .settings-groups, .settings-form-grid { padding: 24px 20px; }
   .settings-backup-card, .settings-bot-card, .settings-updates-card { min-height: 0; }
   .settings-backup-card .backup-content, .settings-updates-card .updates-content { padding: 24px 20px; }

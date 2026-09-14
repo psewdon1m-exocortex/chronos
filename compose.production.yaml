@@ -39,11 +39,13 @@ services:
     environment:
       CHRONOS_LISTEN_PORT: "${CHRONOS_LISTEN_PORT:-18280}"
       CHRONOS_DATA_DIR: /app/data
+      CHRONOS_STORAGE_PATH: /app/database-storage
       CHRONOS_VERSION: "${CHRONOS_VERSION:-0.1.0}"
       CHRONOS_ACCESS_KEY: "${CHRONOS_ACCESS_KEY:?Set CHRONOS_ACCESS_KEY in .env}"
       CHRONOS_SESSION_SECRET: "${CHRONOS_SESSION_SECRET:?Set CHRONOS_SESSION_SECRET in .env}"
       CHRONOS_COOKIE_SECURE: "${CHRONOS_COOKIE_SECURE:-true}"
       CHRONOS_TRUST_PROXY: "${CHRONOS_TRUST_PROXY:-true}"
+      CHRONOS_TRUSTED_PROXY_IPS: "${CHRONOS_TRUSTED_PROXY_IPS:-127.0.0.1,::1}"
       CHRONOS_REPOSITORY_URL: "${CHRONOS_REPOSITORY_URL:-}"
       CHRONOS_PUBLIC_URL: "${CHRONOS_PUBLIC_URL:-}"
       DATABASE_URL: "postgresql://chronos:${CHRONOS_DB_PASSWORD:?Set CHRONOS_DB_PASSWORD in .env}@db:5432/chronos"
@@ -63,12 +65,13 @@ services:
       NEPTUNE_EXPORT_TOKEN_FILE: /run/secrets/neptune/export.token
       GRYPHON_SERVICE_TOKEN_FILE: /run/secrets/gryphon/chronos.token
       GRYPHON_SOCKET_PATH: /run/gryphon/client.sock
-      GRYPHON_ADAPTER_URL: "${GRYPHON_ADAPTER_URL:-http://chronos:18280/api/internal/gryphon/command}"
+      GRYPHON_ADAPTER_URL: "${GRYPHON_ADAPTER_URL:-}"
       GRYPHON_TIMEOUT_SEC: "${GRYPHON_TIMEOUT_SEC:-5}"
       UPDATER_HEAD_ID: "${UPDATER_HEAD_ID:-chronos}"
       UPDATER_CONTROL_TOKEN: "${UPDATER_CONTROL_TOKEN:?Set UPDATER_CONTROL_TOKEN in .env}"
     volumes:
       - chronos-data:/app/data
+      - chronos-db:/app/database-storage:ro
       - type: bind
         source: "${UPDATER_SOCKET_DIR:-/run/exocortex}"
         target: /run/exocortex

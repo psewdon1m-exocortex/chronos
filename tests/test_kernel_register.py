@@ -41,7 +41,7 @@ def snapshot(values: dict) -> dict:
 
 
 def reference(number: int) -> str:
-    return f"volt://{number:08x}-1111-4111-8111-111111111111/{number:08x}-2222-4222-8222-222222222222"
+    return f"volt://{number:08x}-1111-4111-8111-111111111111/1"
 
 
 def test_register_applies_chronos_runtime_values(monkeypatch) -> None:

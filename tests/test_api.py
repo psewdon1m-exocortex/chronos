@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import asyncio
+import asyncpg
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +15,15 @@ def test_health_login_and_protected_dashboard(monkeypatch) -> None:
     database_url = os.getenv("TEST_DATABASE_URL", "")
     if not database_url:
         pytest.skip("TEST_DATABASE_URL is not configured")
+    if not database_url.rstrip("/").endswith("chronos_test"):
+        raise RuntimeError("TEST_DATABASE_URL must identify the chronos_test database")
+    async def reset_test_database():
+        connection = await asyncpg.connect(database_url)
+        try:
+            await connection.execute("drop schema public cascade; create schema public")
+        finally:
+            await connection.close()
+    asyncio.run(reset_test_database())
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("CHRONOS_ACCESS_KEY", "test-access-key-long-enough")
     monkeypatch.setenv("CHRONOS_SESSION_SECRET", "s" * 40)

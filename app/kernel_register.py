@@ -8,21 +8,31 @@ import re
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 from .config import RuntimeConfig
 
 
 SNAPSHOT_SCHEMA = "exocortex.register.snapshot.v1"
 REVISION_PATTERN = re.compile(r"^register-[A-Za-z0-9-]+$")
+DEPLOYMENT_PROFILE = json.loads(Path(__file__).with_name("deployment-profile.json").read_text(encoding="utf-8"))
 VOLT_REFERENCE_PATTERN = re.compile(
-    r"^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    r"^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[1-5]$",
     re.IGNORECASE,
 )
 
 
 class KernelRegisterError(RuntimeError):
     pass
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # A discovery endpoint never delegates the caller's service credential.
+        return None
+
+
+urlopen = build_opener(_NoRedirect()).open
 
 
 def _canonical_json(value: Any) -> str:
@@ -43,6 +53,12 @@ def _verify_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     ).hexdigest()
     if snapshot.get("checksum") != expected:
         raise KernelRegisterError("Kernel Register checksum mismatch")
+    def check(value):
+        if isinstance(value, dict):
+            for child in value.values(): check(child)
+        elif not isinstance(value, str) or not VOLT_REFERENCE_PATTERN.fullmatch(value):
+            raise KernelRegisterError("Kernel snapshot contains a non-reference value")
+    check(values)
     return snapshot
 
 
@@ -85,6 +101,26 @@ def _resolve(values: dict[str, Any], key: str) -> Any:
 def register_value(snapshot: dict[str, Any], key: str) -> Any:
     values = snapshot.get("values")
     return _resolve(values, key) if isinstance(values, dict) else None
+
+
+def profile_missing(snapshot: dict[str, Any]) -> list[str]:
+    return [key for key in DEPLOYMENT_PROFILE["keys"] if not register_value(snapshot, key)]
+
+
+def _validate_profile_value(key: str, value: str) -> None:
+    kind = DEPLOYMENT_PROFILE["keys"].get(key)
+    if not value or len(value) > 2048 or any(character in value for character in "\r\n\0"):
+        raise KernelRegisterError(f"Invalid Register value for {key}")
+    valid = True
+    if kind == "github-repository":
+        parsed = urlparse(value)
+        valid = parsed.scheme == "https" and parsed.netloc == "github.com" and not parsed.query and not parsed.fragment and bool(re.fullmatch(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?", parsed.path))
+    elif kind == "hostname": valid = bool(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", value))
+    elif kind == "port": valid = bool(re.fullmatch(r"[0-9]{1,5}", value)) and 0 < int(value) <= 65535
+    elif kind == "path": valid = value.startswith("/") and not value.startswith("//") and not any(part in {"..", "."} for part in value.split("/")) and not any(c in value for c in "?#\\")
+    elif kind == "health-contract": valid = value in {"private-readiness", "public-readiness", "public-liveness"}
+    elif kind == "slug": valid = bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value))
+    if not valid: raise KernelRegisterError(f"Invalid {kind} in Kernel Register key {key}")
 
 
 def _first_string(values: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -243,16 +279,18 @@ def apply_register(
         "services.chronos.sni",
         "services.chronos.port",
         "intervals.kernel.refresh_sec",
+        "services.chronos.health.path",
+        "services.chronos.health.contract",
+        "services.chronos.backup.saturn_slug",
     )
     present = [key for key in candidate_keys if _resolve(stored_values, key) is not None]
     for key in present:
         reference = _resolve(stored_values, key)
         if not isinstance(reference, str) or not VOLT_REFERENCE_PATTERN.fullmatch(reference):
             raise KernelRegisterError(f"Kernel Register key {key} must use volt://<entry-id>/<field-id>")
-    values = _replace_resolved(
-        stored_values,
-        _resolve_kernel_values(config, present, opener=kernel_opener) if present else {},
-    )
+    resolved = _resolve_kernel_values(config, present, opener=kernel_opener) if present else {}
+    for key, value in resolved.items(): _validate_profile_value(key, value)
+    values = _replace_resolved(stored_values, resolved)
     repository = _first_string(values, ("repositories.chronos.url",))
     if repository:
         repository = _https_url(repository, "repositories.chronos.url")

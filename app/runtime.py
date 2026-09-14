@@ -10,6 +10,8 @@ class RuntimeState:
         self._config = config
         self._lock = asyncio.Lock()
         self.changed = asyncio.Event()
+        self.register_ready = not bool(config.kernel_url)
+        self.register_error = ""
 
     @property
     def config(self) -> RuntimeConfig:
@@ -24,4 +26,3 @@ class RuntimeState:
 
     def clear_change(self) -> None:
         self.changed.clear()
-

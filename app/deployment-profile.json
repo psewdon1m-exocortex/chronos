@@ -1,0 +1,13 @@
+{
+  "schema": "exocortex.head.profile.v1",
+  "service": "chronos",
+  "helpers": ["neptune", "gryphon"],
+  "keys": {
+    "repositories.chronos.url": "github-repository",
+    "services.chronos.sni": "hostname",
+    "services.chronos.port": "port",
+    "services.chronos.health.path": "path",
+    "services.chronos.health.contract": "health-contract",
+    "services.chronos.backup.saturn_slug": "slug"
+  }
+}

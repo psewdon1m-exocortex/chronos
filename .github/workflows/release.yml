@@ -6,10 +6,7 @@ on:
       - "chronos-v*"
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   UPDATER_REPOSITORY: ${{ vars.UPDATER_REPOSITORY || 'psewdon1m-exocortex/updater' }}
@@ -20,8 +17,15 @@ jobs:
       contents: read
     uses: ./.github/workflows/ci.yml
 
-  release:
+  prepare:
     needs: quality-gate
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      image: ${{ steps.image.outputs.reference }}
+      digest: ${{ steps.image.outputs.digest }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -60,21 +64,17 @@ jobs:
           version="${GITHUB_REF_NAME#chronos-v}"
           [[ "$GITHUB_REF_NAME" == "chronos-v${version}" ]]
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          test "$(node -p "require('./web/package.json').version")" = "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Test and build
-        env:
-          TEST_DATABASE_URL: postgresql://chronos:test-database-password@127.0.0.1:5432/chronos_test
-        shell: bash
+      - name: Download current-revision policy evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: chronos-policy-${{ github.sha }}
+      - name: Verify tag targets current main
         run: |
-          sh -n bootstrap.sh install.sh
-          pip install -r requirements-dev.txt
-          PYTHONPATH=. pytest
-          cd web
-          pnpm install --frozen-lockfile
-          pnpm test
-          pnpm build
-
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
       - name: Download and verify pinned Updater
         env:
           GH_TOKEN: ${{ secrets.RELEASE_READ_TOKEN || secrets.GITHUB_TOKEN }}
@@ -85,7 +85,10 @@ jobs:
           gh release download "updater-v${updater_version}" \
             --repo "$UPDATER_REPOSITORY" --dir .release-inputs \
             --pattern "updater-${updater_version}-install.tar.gz" \
-            --pattern "updater-${updater_version}-install.tar.gz.sha256"
+            --pattern "updater-${updater_version}-install.tar.gz.sha256" \
+            --pattern "updater-release.json" --pattern "updater-release.json.sig.json"
+          python3 scripts/verify-release-manifest.py .release-inputs/updater-release.json .release-inputs/updater-release.json.sig.json .release/updater-public-key.pem
+          python3 scripts/verify-updater-bundle.py .release-inputs "$updater_version"
           (cd .release-inputs && sha256sum -c "updater-${updater_version}-install.tar.gz.sha256")
           tar -xzf ".release-inputs/updater-${updater_version}-install.tar.gz" -C .release-inputs
 
@@ -98,8 +101,11 @@ jobs:
       - name: Build and smoke-test image
         shell: bash
         run: |
-          image="release-candidate-chronos:${GITHUB_SHA}"
-          docker buildx build --tag "$image" --load .
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx build --tag "$image:candidate-${GITHUB_SHA}" --push --provenance=true --sbom=true --build-arg CHRONOS_VERSION="${{ steps.release.outputs.version }}" --metadata-file image-metadata.json .
+          digest="$(jq -er '."containerimage.digest"' image-metadata.json)"
+          image="$image@$digest"
+          docker pull "$image"
           docker network create chronos-release-test
           docker run -d --name chronos-release-db --network chronos-release-test \
             -e POSTGRES_DB=chronos -e POSTGRES_USER=chronos \
@@ -124,38 +130,114 @@ jobs:
           done
           [[ "$(docker inspect --format '{{.State.Health.Status}}' release-smoke-chronos)" == healthy ]]
 
-      - name: Publish immutable image
+      - name: Record tested immutable image
         id: image
         shell: bash
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker buildx build --tag "${image}:${{ steps.release.outputs.version }}" \
-            --tag "${image}:latest" --push --provenance=true --sbom=true \
-            --metadata-file image-metadata.json .
           digest="$(jq -er '."containerimage.digest"' image-metadata.json)"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           echo "reference=$image" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
+      - name: Qualify all pre-signing checks before granting signing access
+        run: |
+          python3 scripts/known-problems-gate.py --record helper-contract --command python3 scripts/verify-updater-bundle.py .release-inputs "$(cat .release/updater.version)"
+          python3 scripts/known-problems-gate.py --phase pre-signing
+      - name: Preserve unsigned candidate inputs and qualification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chronos-prepared-${{ github.sha }}
+          path: |
+            .release-inputs/
+            .release-evidence/
+            known-problems-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  signing:
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: "24"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: actions/download-artifact@v4
+        with:
+          name: chronos-prepared-${{ github.sha }}
+      - name: Revalidate pre-signing receipts
+        run: python3 scripts/known-problems-gate.py --phase pre-signing
+      - name: Export release public key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: node scripts/sign-release.mjs --export-public-key release-artifacts/chronos.pem
+
       - name: Build release artifacts
         env:
-          IMAGE_REFERENCE: ${{ steps.image.outputs.reference }}
-          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          IMAGE_REFERENCE: ${{ needs.prepare.outputs.image }}
+          IMAGE_DIGEST: ${{ needs.prepare.outputs.digest }}
         shell: bash
         run: |
           updater_version="$(tr -d '[:space:]' < .release/updater.version)"
           UPDATER_BUNDLE_DIR="$PWD/.release-inputs/updater" \
           UPDATER_BUNDLE_VERSION="$updater_version" \
-            bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
+            bash scripts/build-release.sh "${{ needs.prepare.outputs.version }}"
+
+      - name: Sign and verify final release assets
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          node scripts/sign-release.mjs release-artifacts/chronos-release.json
+          python3 scripts/verify-release-manifest.py release-artifacts/chronos-release.json release-artifacts/chronos-release.json.sig.json release-artifacts/chronos.pem
+          sh -n release-artifacts/bootstrap.sh
+          if grep -q '__HEAD_BOOTSTRAP_' release-artifacts/bootstrap.sh; then exit 1; fi
 
       - uses: actions/attest-build-provenance@v3
         with:
           subject-path: "release-artifacts/*"
 
-      - name: Publish GitHub release
+      - name: Stage immutable candidate assets without final discovery
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release-artifacts/* \
-            --verify-tag --latest=false --generate-notes \
-            --title "Chronos ${{ steps.release.outputs.version }}"
+          gh release create "$GITHUB_REF_NAME" release-artifacts/* --verify-tag --prerelease --latest=false --generate-notes --title "chronos ${{ needs.prepare.outputs.version }}"
+      - name: Verify anonymous published assets and final trust
+        run: |
+          python3 scripts/known-problems-gate.py --record published-assets --command python3 scripts/verify-published-assets.py release-artifacts
+          python3 scripts/known-problems-gate.py --phase final
+          cp known-problems-report.json release-artifacts/known-problems-report.json
+      - name: Attach final qualification evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" release-artifacts/known-problems-report.json
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote the already tested digest
+        run: |
+          docker buildx imagetools create --tag "${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}" "${{ needs.prepare.outputs.image }}@${{ needs.prepare.outputs.digest }}"
+          test "$(docker buildx imagetools inspect '${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}' --format '{{.Manifest.Digest}}')" = '${{ needs.prepare.outputs.digest }}'
+      - name: Enable final service-qualified discovery
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --prerelease=false --latest=false
+      - name: Preserve gate diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chronos-final-evidence-${{ github.sha }}
+          path: |
+            .release-evidence/
+            known-problems-report.json
+          include-hidden-files: true

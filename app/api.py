@@ -33,7 +33,7 @@ from .gryphon import (
     GryphonError,
     GryphonNotifier,
 )
-from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value
+from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value, profile_missing
 from .neptune import NeptuneClient, NeptuneError
 from .runtime import RuntimeState
 from .security import (
@@ -50,6 +50,7 @@ from .store import Store
 from .telemetry import TelemetrySampler
 from .timer_service import TimerError, TimerService, timezone_for
 from .updater import UpdaterClient, UpdaterError, check_github_release
+from .validation import SettingsInput, validate_settings
 
 
 LOGGER = logging.getLogger("chronos.api")
@@ -92,22 +93,6 @@ class SessionUpdate(BaseModel):
     started_at: datetime
     stopped_at: datetime | None
     note: str = Field(default="", max_length=500)
-
-
-class SettingsInput(BaseModel):
-    profile_name: str | None = Field(default=None, min_length=1, max_length=64)
-    timezone: str | None = Field(default=None, min_length=1, max_length=128)
-    week_starts_on: int | None = Field(default=None, ge=1, le=7)
-    time_format: str | None = None
-    date_format: str | None = None
-    reminder_minutes: int | None = Field(default=None, ge=0, le=10080)
-    daily_summary_enabled: bool | None = None
-    daily_summary_time: str | None = None
-    theme_accent: str | None = None
-    sidebar_auto_hide: bool | None = None
-    navigation_order: list[str] | None = None
-    dashboard_order: list[str] | None = None
-    settings_order: list[str] | None = None
 
 
 class AccessKeyInput(BaseModel):
@@ -188,7 +173,7 @@ async def operator(request: Request) -> dict[str, Any]:
         runtime.config.session_secret,
         int(security["session_generation"]),
     )
-    if payload is None:
+    if payload is None or await store.session_revoked(request.cookies.get(COOKIE_NAME, "")):
         raise HTTPException(status_code=401, detail="Authentication required")
     request.state.operator = security["username"]
     request.state.session = payload
@@ -242,34 +227,12 @@ def _clear_session_cookies(response: Response, config: RuntimeConfig) -> None:
 
 
 def _validate_settings(data: SettingsInput) -> dict[str, Any]:
-    values = data.model_dump(exclude_none=True)
+    try:
+        values = validate_settings(data)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     if not values:
         raise HTTPException(status_code=400, detail="No settings were supplied")
-    try:
-        zone = values.get("timezone")
-        if zone and zone != "UTC":
-            ZoneInfo(zone)
-    except ZoneInfoNotFoundError as error:
-        raise HTTPException(status_code=400, detail="Unknown timezone") from error
-    if "time_format" in values and values["time_format"] not in {"12h", "24h"}:
-        raise HTTPException(status_code=400, detail="Unsupported time format")
-    if "date_format" in values and values["date_format"] not in {"DD.MM.YYYY", "YYYY-MM-DD", "MM/DD/YYYY"}:
-        raise HTTPException(status_code=400, detail="Unsupported date format")
-    if "daily_summary_time" in values and not TIME_PATTERN.fullmatch(values["daily_summary_time"]):
-        raise HTTPException(status_code=400, detail="Daily summary time must use HH:MM")
-    if "theme_accent" in values and not COLOR_PATTERN.fullmatch(values["theme_accent"]):
-        raise HTTPException(status_code=400, detail="Invalid accent color")
-    orders = {
-        "navigation_order": {"dashboard", "timeline", "analytics", "settings"},
-        "dashboard_order": {"cpu", "ram", "disk", "uptime", "current", "today", "recent"},
-        "settings_order": {
-            "appearance", "security", "backup", "gryphon", "updates", "logs",
-            "personalization",
-        },
-    }
-    for name, expected in orders.items():
-        if name in values and (len(values[name]) != len(expected) or set(values[name]) != expected):
-            raise HTTPException(status_code=400, detail=f"Invalid {name}")
     return values
 
 
@@ -361,6 +324,9 @@ async def _load_register_once(app: FastAPI) -> None:
         snapshot = await asyncio.to_thread(load_snapshot, runtime.config)
         updated = await asyncio.to_thread(apply_register, runtime.config, snapshot)
         await runtime.replace(updated)
+        missing = profile_missing(snapshot) if updated.kernel_url else []
+        runtime.register_ready = not missing
+        runtime.register_error = "Missing Register keys: " + ", ".join(missing) if missing else ""
         if updated.register_revision and updated.register_revision != previous:
             await store.audit(
                 status="info",
@@ -370,6 +336,8 @@ async def _load_register_once(app: FastAPI) -> None:
                 message="Kernel Register configuration applied",
             )
     except KernelRegisterError as error:
+        runtime.register_ready = False
+        runtime.register_error = str(error)
         LOGGER.warning("Kernel Register refresh failed: %s", error)
         await store.audit(
             status="error",
@@ -441,7 +409,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.timers = timers
     app.state.gryphon = gryphon
     app.state.gryphon_client = gryphon_client
-    app.state.telemetry = TelemetrySampler(config.data_dir)
+    app.state.telemetry = TelemetrySampler(config.storage_path or config.data_dir)
     app.state.updater = UpdaterClient(
         config.updater_socket_path, config.updater_control_token, config.updater_head_id
     )
@@ -531,14 +499,31 @@ def create_app() -> FastAPI:
             database = "available"
         except Exception:
             database = "unavailable"
-        status = "available" if database == "available" else "unavailable"
-        return {
+        status = "available" if database == "available" and runtime.register_ready else "unavailable"
+        return JSONResponse(status_code=200 if status == "available" else 503, content={
             "status": status,
             "service": "chronos",
             "version": runtime.config.version,
             "database": database,
             "register_revision": runtime.config.register_revision or None,
-        }
+            "level": "core-readiness",
+        })
+
+    @app.get("/api/ready")
+    async def deployment_readiness(request: Request, _: dict[str, Any] = Depends(operator)):
+        await _load_register_once(request.app)
+        agents = await asyncio.gather(request.app.state.updater.status(), request.app.state.neptune.availability(), request.app.state.gryphon_client.status(), return_exceptions=True)
+        checks = {"kernel": request.app.state.runtime.register_ready and bool(request.app.state.runtime.config.register_revision),
+            "updater": isinstance(agents[0], dict) and bool(agents[0].get("available")),
+            "neptune": isinstance(agents[1], dict) and bool(agents[1].get("linked")),
+            "gryphon": isinstance(agents[2], dict) and bool(agents[2].get("connected")) and bool(agents[2].get("binding"))}
+        try:
+            await request.app.state.pool.fetchval("select 1")
+            checks["database"] = True
+        except Exception:
+            checks["database"] = False
+        ready = all(checks.values())
+        return JSONResponse(status_code=200 if ready else 503, content={"ready": ready, "checks": checks, "external_delivery_verified": False})
 
     @app.get("/api/public/theme")
     async def public_theme(request: Request):
@@ -550,6 +535,8 @@ def create_app() -> FastAPI:
         try:
             await request.app.state.pool.fetchval("select 1")
         except Exception:
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
+        if not request.app.state.runtime.register_ready:
             return JSONResponse(status_code=503, content={"status": "unavailable"})
         return {"status": "available"}
 
@@ -598,6 +585,9 @@ def create_app() -> FastAPI:
 
     @app.post("/api/auth/logout")
     async def logout(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        await request.app.state.store.revoke_session(
+            request.cookies.get(COOKIE_NAME, ""), int(_["expires_at"])
+        )
         response = JSONResponse({"authenticated": False})
         _clear_session_cookies(response, request.app.state.runtime.config)
         await request.app.state.store.audit(
@@ -781,7 +771,8 @@ def create_app() -> FastAPI:
                 "repository_url": runtime.config.repository_url,
                 "register_revision": runtime.config.register_revision or None,
                 "kernel_url": runtime.config.kernel_url or None,
-                "kernel_reachable": bool(runtime.config.register_revision),
+                "kernel_reachable": runtime.register_ready and bool(runtime.config.register_revision),
+                "register_error": runtime.register_error,
                 "kernel_configured": bool(stored_kernel["kernel_token_ciphertext"]),
             },
         }
@@ -956,7 +947,8 @@ def create_app() -> FastAPI:
         _clear_sensitive_rate(request, "kernel-token")
         return {"changed": True, "kernel_url": updated.kernel_url, "kernel_reachable": True}
 
-    @app.post("/api/internal/gryphon/command")
+    @app.post("/internal/gryphon/command")
+    @app.post("/api/internal/gryphon/command", include_in_schema=False)
     async def gryphon_command(
         request: Request,
         body: dict[str, Any],
@@ -1035,36 +1027,37 @@ def create_app() -> FastAPI:
 
     @app.put("/api/neptune/schedule", status_code=204)
     async def neptune_schedule(request: Request, body: NeptuneScheduleInput, _: dict[str, Any] = Depends(mutation_operator)):
-        await request.app.state.neptune.schedule(body.enabled, body.interval_hours)
-        return Response(status_code=204)
+        raise HTTPException(status_code=409, detail="Backup schedules are owned by Saturn → Synchronization")
 
     @app.post("/api/neptune/runs", status_code=202)
     async def neptune_run(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        return await request.app.state.neptune.run()
+        raise HTTPException(status_code=409, detail="Remote backup runs are owned by Saturn → Synchronization")
 
     @app.post("/api/neptune/update/check")
     async def neptune_update_check(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        config = request.app.state.runtime.config
-        snapshot = await asyncio.to_thread(load_snapshot, config)
-        repository = register_value(snapshot, "repositories.neptune.url")
-        if not isinstance(repository, str) or not repository:
-            raise HTTPException(status_code=409, detail="Register key repositories.neptune.url is missing")
         status = await request.app.state.neptune.status()
-        return await check_github_release(repository, str(status["version"]), config.update_check_timeout_seconds, "neptune-linux")
+        return await request.app.state.updater.check_neptune(str(status["version"]))
 
     @app.post("/api/neptune/update/install")
     async def neptune_update_install(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
         requested_version = str(body.get("version") or "")
-        config = request.app.state.runtime.config
-        snapshot = await asyncio.to_thread(load_snapshot, config)
-        repository = register_value(snapshot, "repositories.neptune.url")
-        if not repository:
-            raise HTTPException(status_code=409, detail="Register key repositories.neptune.url is missing")
         status = await request.app.state.neptune.status()
-        update = await check_github_release(repository, str(status["version"]), config.update_check_timeout_seconds, "neptune-linux")
+        update = await request.app.state.updater.check_neptune(str(status["version"]))
         if not update["update_available"] or update["available_version"] != requested_version:
             raise HTTPException(status_code=409, detail="Requested Neptune version is not the current upgrade candidate")
         return await request.app.state.updater.update_neptune(requested_version)
+
+    @app.post("/api/gryphon/initialize", status_code=202)
+    async def gryphon_initialize(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        return await request.app.state.updater.lifecycle("gryphon-initialization")
+
+    @app.post("/api/gryphon/bots", status_code=202)
+    async def gryphon_add_bot(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        return await request.app.state.updater.lifecycle("gryphon-bot", alias=str(body.get("alias") or ""), bot_token=str(body.get("bot_token") or ""))
+
+    @app.post("/api/updates/agent/install", status_code=202)
+    async def updater_self_update(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        return await request.app.state.updater.lifecycle("updater-self-update")
 
     @app.get("/api/gryphon/status")
     async def gryphon_status(request: Request, _: dict[str, Any] = Depends(operator)):
@@ -1077,8 +1070,12 @@ def create_app() -> FastAPI:
     @app.put("/api/gryphon/connection")
     async def gryphon_connect(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
         bot_id = str(body.get("botId") or "")
+        await _load_register_once(request.app)
+        config = request.app.state.runtime.config
+        if not request.app.state.runtime.register_ready or not config.register_revision or not config.public_url.startswith("https://"):
+            raise HTTPException(status_code=503, detail="Canonical Chronos HTTPS origin is unavailable in Kernel")
         result = await request.app.state.gryphon_client.connect(
-            bot_id, request.app.state.runtime.config.gryphon_adapter_url
+            bot_id, config.public_url.rstrip("/") + "/internal/gryphon/command"
         )
         await request.app.state.store.audit(
             status="success",
@@ -1146,12 +1143,20 @@ def create_app() -> FastAPI:
                         raise ValueError("Archive expands beyond 128 MB")
                     if any(item.file_size > 64 * 1024 * 1024 for item in archive.infolist()):
                         raise ValueError("Archive member exceeds 64 MB")
+                    if any(item.flag_bits & 1 or (item.external_attr >> 16) & 0o170000 == 0o120000 for item in archive.infolist()):
+                        raise ValueError("Encrypted or symlink archive member")
+                    if any(item.file_size > max(1, item.compress_size) * 120 for item in archive.infolist()):
+                        raise ValueError("Archive compression ratio exceeds limit")
                     raw = archive.read("chronos-backup.json")
                     if "manifest.json" in names:
                         manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
                         entry = manifest.get("files", {}).get("chronos-backup.json", {})
                         if entry.get("sha256") != hashlib.sha256(raw).hexdigest():
                             raise ValueError("Backup checksum does not match the manifest")
+                        if manifest.get("service") != "chronos" or entry.get("uncompressed_bytes") != len(raw):
+                            raise ValueError("Backup manifest identity or size mismatch")
+                        if entry.get("records") != len(json.loads(raw).get("sessions", [])):
+                            raise ValueError("Backup manifest record count mismatch")
             else:
                 raw = body
             return json.loads(raw.decode("utf-8"))
@@ -1192,7 +1197,10 @@ def create_app() -> FastAPI:
             actor="operator",
             message=f"Restored {count} sessions",
         )
-        return {"restored_sessions": count}
+        response = JSONResponse({"restored_sessions": count, "reauthenticate": True,
+            "access_policy": "archive-verifier" if backup.get("recovery", {}).get("security") else "retain-target-key-legacy-backup"})
+        _clear_session_cookies(response, request.app.state.runtime.config)
+        return response
 
     @app.post("/api/internal/updater/restore")
     async def updater_restore(

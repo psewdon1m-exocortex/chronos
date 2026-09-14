@@ -126,7 +126,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       {!fixed && <div className="sidebar-activation" onPointerEnter={() => setSidebarOpen(true)} />}
       {mobileOpen && <button className="sidebar-backdrop" aria-label="Close menu" onClick={() => setMobileOpen(false)} />}
       <aside
-        className={`sidebar ${fixed || sidebarOpen || mobileOpen ? "is-open" : ""}`}
+        className={`sidebar ${fixed || sidebarOpen || mobileOpen ? "is-open" : ""} ${mobileOpen ? "mobile-open" : ""}`}
         onPointerEnter={() => setSidebarOpen(true)}
         onPointerLeave={() => !fixed && !mobileOpen && setSidebarOpen(false)}
       >

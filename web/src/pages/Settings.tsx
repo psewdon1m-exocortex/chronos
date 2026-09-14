@@ -109,6 +109,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [neptunePending, setNeptunePending] = useState(false);
   const [gryphon, setGryphon] = useState<GryphonStatus | null>(null);
   const [gryphonBots, setGryphonBots] = useState<GryphonBot[]>([]);
+  const [botCredentials, setBotCredentials] = useState({ alias: "", bot_token: "" });
   const [gryphonBotId, setGryphonBotId] = useState("");
   const [gryphonConnectionOpen, setGryphonConnectionOpen] = useState(false);
   const [gryphonPending, setGryphonPending] = useState(false);
@@ -297,9 +298,10 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     const form = new FormData();
     form.append("file", restoreFile);
     try {
-      const result = await api<{ restored_sessions: number }>("/api/backup/restore", { method: "POST", body: form });
-      notify("success", `Snapshot restored: ${result.restored_sessions} sessions.`);
+      const result = await api<{ restored_sessions: number; reauthenticate?: boolean }>("/api/backup/restore", { method: "POST", body: form });
+      notify("success", `Snapshot restored: ${result.restored_sessions} sessions. Sign in with the restored Access Key.`);
       closeRestore();
+      if (result.reauthenticate) { window.location.assign("/"); return; }
       await load();
     } catch (error) {
       setRestoreError(error instanceof Error ? error.message : "Snapshot could not be restored.");
@@ -325,14 +327,42 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     finally { setGryphonPending(false); }
   };
 
+  const waitComponent = async (started: Record<string, unknown>) => {
+    const id = String(started.id || "");
+    if (!id) throw new Error("Updater omitted the operation id");
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const result = await api<Record<string, unknown>>("/api/updates/jobs/" + encodeURIComponent(id));
+      if (result.state === "COMPLETED") return result;
+      if (["FAILED", "ROLLED_BACK", "ROLLBACK_FAILED"].includes(String(result.state))) throw new Error(String(result.message || result.state));
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    }
+    throw new Error("Operation is still running. Check Updater status before retrying.");
+  };
+  const initializeGryphon = async () => {
+    setGryphonPending(true);
+    try { await waitComponent(await api("/api/gryphon/initialize", { method: "POST" })); await loadGryphon(); notify("success", "Gryphon initialized."); }
+    catch (error) { notify("error", error instanceof Error ? error.message : "Initialization failed."); }
+    finally { setGryphonPending(false); }
+  };
+  const addGryphonBot = async (event: FormEvent) => {
+    event.preventDefault(); setGryphonPending(true);
+    try {
+      const started = await api<Record<string, unknown>>("/api/gryphon/bots", { method: "POST", body: JSON.stringify(botCredentials) });
+      setBotCredentials({ alias: "", bot_token: "" }); await waitComponent(started);
+      const result = await api<{ bots: GryphonBot[] }>("/api/gryphon/bots"); setGryphonBots(result.bots);
+      notify("success", "Bot registered. Select it to link Chronos.");
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Bot registration failed."); }
+    finally { setGryphonPending(false); }
+  };
   const initializeNeptune = async (event: FormEvent) => {
     event.preventDefault();
     if (!/^[A-Za-z0-9_-]{32}$/.test(neptuneCode)) { notify("error", "Enter the 32-character setup code from Saturn."); return; }
     setNeptunePending(true);
     try {
-      await api("/api/neptune/initialize", { method: "POST", body: JSON.stringify({ enrollment_code: neptuneCode }) });
+      const started = await api<Record<string, unknown>>("/api/neptune/initialize", { method: "POST", body: JSON.stringify({ enrollment_code: neptuneCode }) });
+      setNeptuneCode(""); await waitComponent(started); await loadNeptune();
       setNeptuneCode(""); setNeptuneOpen(false);
-      notify("success", "Neptune initialization started. Chronos may reconnect while the service is linked.");
+      notify("success", "Neptune initialization completed and verified.");
     } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune initialization could not be started."); }
     finally { setNeptunePending(false); }
   };
@@ -486,15 +516,15 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     </UniversalCard>,
     backup: <UniversalCard title="Backup" {...cardProps("backup", "settings-backup-card")}>
       <div className="settings-groups backup-content">
-        <section className="settings-group"><h3>System snapshot</h3><p>Logical snapshots contain sessions and presentation settings, but no Access Key or service tokens.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
+        <section className="settings-group"><h3>System snapshot</h3><p>Snapshots contain sessions, settings, Undo history and the Access Key verifier. Service tokens remain on the target machine. Restore signs out every session.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
         <section className="settings-group"><h3>Restore snapshot</h3><p>Validation completes before replacement begins. A pre-restore transaction protects the current timeline.</p><button type="button" className="settings-action" onClick={() => setRestoreOpen(true)} data-smart-hover>Browse local snapshot archive</button></section>
-        <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Schedules, remote runs and Neptune fleet status are managed only from Saturn → Synchronization. Manual Chronos ZIP download and restore remain here.</p><div className="service-status-row"><span>Local Neptune agent:</span><span className={neptune?.linked ? "status-success" : "status-error"}>{neptune?.linked ? "Linked to Saturn" : neptune?.installed ? "Detected · not linked" : "Not installed"}</span><StatusSquare state={neptune?.linked ? "success" : "danger"} /></div>{neptune?.installed && !neptune.linked && <button type="button" className="settings-action" disabled={neptunePending || !updates?.updater.available} onClick={() => setNeptuneOpen(true)} data-smart-hover>Initialize Neptune</button>}</section>
+        <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Schedules, remote runs and Neptune fleet status are managed only from Saturn → Synchronization. Manual Chronos ZIP download and restore remain here.</p><div className="service-status-row"><span>Local Neptune agent:</span><span className={neptune?.linked ? "status-success" : "status-error"}>{neptune?.linked ? "Linked to Saturn" : neptune?.installed ? "Detected · not linked" : "Not installed"}</span><StatusSquare state={neptune?.linked ? "success" : "danger"} /></div>{!neptune?.linked && <button type="button" className="settings-action" disabled={neptunePending || !updates?.updater.available} onClick={() => setNeptuneOpen(true)} data-smart-hover>Initialize Neptune</button>}</section>
       </div>
     </UniversalCard>,
     gryphon: <UniversalCard title="Bot connection" {...cardProps("gryphon", "settings-bot-card")}>
       <div className="settings-groups bot-connection-groups">
         <section className="settings-group"><h3>Gryphon bot binding</h3><p>Gryphon owns the Telegram connection, service receives only service-scoped commands.</p><div className="service-status-row bot-connection-status"><span>Local Gryphon agent:</span><span className={gryphon ? "status-success" : "status-error"}>{gryphon ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={gryphon ? "success" : "danger"} /></div>{gryphon?.connected && gryphon.bot ? <p className="bot-connection-selected">Connected bot: <strong>{gryphon.bot.username ? `@${gryphon.bot.username}` : gryphon.bot.alias}</strong></p> : null}{gryphon?.connected && !gryphon.binding ? <button type="button" className="settings-action bot-connection-action" disabled={gryphonPending} onClick={() => void issueGryphonLink()} data-smart-hover>{gryphonPending ? "Creating…" : "Initialize bot"}</button> : null}<button type="button" className="settings-action bot-connection-action" disabled={!gryphon || gryphonPending} onClick={() => void (gryphon?.connected ? disconnectGryphon() : openGryphonConnection())} data-smart-hover>{gryphonPending ? "Working…" : gryphon?.connected ? "Unlink Chronos function" : "Link Chronos function"}</button>{gryphon?.binding ? <p className="bot-connection-selected">Telegram account linked.</p> : null}{!gryphon && gryphonError ? <p className="inline-error">{gryphonError}</p> : null}</section>
-        <section className="settings-group"><h3>Gryphon version</h3><p>Current installed version: <strong>{gryphon?.version ?? "unavailable"}</strong>{gryphonRelease?.available_version ? ` · latest ${gryphonRelease.available_version}` : ""}</p><button type="button" className="settings-action" disabled={!gryphon || gryphonPending} onClick={() => void checkGryphon()} data-smart-hover>Check Gryphon for updates</button>{gryphonRelease?.update_available && <button type="button" className="settings-action" disabled={gryphonPending} onClick={() => void installGryphon()} data-smart-hover>{gryphonPending ? "Installing…" : `Install Gryphon ${gryphonRelease.available_version}`}</button>}</section>
+        <section className="settings-group"><h3>Gryphon version</h3>{!gryphon && <button type="button" disabled={gryphonPending || !updates?.updater.available} onClick={() => void initializeGryphon()}>Initialize Gryphon</button>}<p>Current installed version: <strong>{gryphon?.version ?? "unavailable"}</strong>{gryphonRelease?.available_version ? ` · latest ${gryphonRelease.available_version}` : ""}</p><button type="button" className="settings-action" disabled={!gryphon || gryphonPending} onClick={() => void checkGryphon()} data-smart-hover>Check Gryphon for updates</button>{gryphonRelease?.update_available && <button type="button" className="settings-action" disabled={gryphonPending} onClick={() => void installGryphon()} data-smart-hover>{gryphonPending ? "Installing…" : `Install Gryphon ${gryphonRelease.available_version}`}</button>}</section>
       </div>
     </UniversalCard>,
     updates: <UniversalCard title="Updates" {...cardProps("updates", "settings-updates-card")}>
@@ -530,7 +560,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
 
     {kernelTokenOpen && <Overlay title="Rotate Kernel access token" onClose={() => { setKernelTokenOpen(false); setKernelTokens({ next: "", repeat: "" }); }} dismissible={!kernelTokens.next && !kernelTokens.repeat && !kernelTokenPending}><form className="form-grid" onSubmit={rotateKernelToken}><p className="form-hint">The replacement is write-only and will be tested against <strong>{kernelUrl}</strong> before the current connection changes.</p><label><span>New Kernel token</span><input type="password" minLength={24} autoComplete="new-password" value={kernelTokens.next} onChange={(event) => setKernelTokens({ ...kernelTokens, next: event.target.value })} /></label><label><span>Repeat new Kernel token</span><input type="password" minLength={24} autoComplete="new-password" value={kernelTokens.repeat} onChange={(event) => setKernelTokens({ ...kernelTokens, repeat: event.target.value })} /></label><div className="form-actions"><button type="button" disabled={kernelTokenPending} onClick={() => { setKernelTokenOpen(false); setKernelTokens({ next: "", repeat: "" }); }} data-smart-hover>Cancel</button><SubmitButton pending={kernelTokenPending} label="Validate and rotate" pendingLabel="Validating..." /></div></form></Overlay>}
 
-    {gryphonConnectionOpen && <Overlay title="Link Chronos function" onClose={() => setGryphonConnectionOpen(false)} dismissible={!gryphonPending}><div className="bot-picker"><p className="form-hint">Select a Telegram bot already connected through the Gryphon CLI.</p><div className="bot-picker-list">{gryphonBots.length ? gryphonBots.map((bot) => <label key={bot.id} className={bot.state === "ready" ? "" : "is-disabled"}><input type="radio" name="chronos-gryphon-bot" value={bot.id} checked={gryphonBotId === bot.id} disabled={bot.state !== "ready" || gryphonPending} onChange={() => setGryphonBotId(bot.id)} /><span><strong>{bot.username ? `@${bot.username}` : bot.alias}</strong><small>{bot.alias} · {bot.state}</small></span></label>) : <p>No bots are connected. Add one with <code>gryphon bot connect</code>.</p>}</div><div className="form-actions"><button type="button" disabled={gryphonPending} onClick={() => setGryphonConnectionOpen(false)} data-smart-hover>Cancel</button><button type="button" disabled={!gryphonBotId || gryphonPending} onClick={() => void connectGryphon()} data-smart-hover>{gryphonPending ? "Linking…" : "Link function"}</button></div></div></Overlay>}
+    {gryphonConnectionOpen && <Overlay title="Link Chronos function" onClose={() => setGryphonConnectionOpen(false)} dismissible={!gryphonPending}><div className="bot-picker"><p className="form-hint">Select a connected bot, or register a bot below.</p><form className="form-grid" onSubmit={addGryphonBot}><label>Bot alias<input value={botCredentials.alias} required pattern="[a-z][a-z0-9-]{1,47}" onChange={(e) => setBotCredentials({ ...botCredentials, alias: e.target.value })} /></label><label>Bot token<input type="password" autoComplete="new-password" value={botCredentials.bot_token} required onChange={(e) => setBotCredentials({ ...botCredentials, bot_token: e.target.value })} /></label><button type="submit" disabled={gryphonPending}>Register bot</button></form><div className="bot-picker-list">{gryphonBots.length ? gryphonBots.map((bot) => <label key={bot.id} className={bot.state === "ready" ? "" : "is-disabled"}><input type="radio" name="chronos-gryphon-bot" value={bot.id} checked={gryphonBotId === bot.id} disabled={bot.state !== "ready" || gryphonPending} onChange={() => setGryphonBotId(bot.id)} /><span><strong>{bot.username ? `@${bot.username}` : bot.alias}</strong><small>{bot.alias} · {bot.state}</small></span></label>) : <p>No bots are connected yet.</p>}</div><div className="form-actions"><button type="button" disabled={gryphonPending} onClick={() => setGryphonConnectionOpen(false)} data-smart-hover>Cancel</button><button type="button" disabled={!gryphonBotId || gryphonPending} onClick={() => void connectGryphon()} data-smart-hover>{gryphonPending ? "Linking…" : "Link function"}</button></div></div></Overlay>}
 
     {restoreOpen && <Overlay title="Restore Chronos snapshot" onClose={closeRestore} dismissible={!restoreFile && !restorePending}><div className="restore-flow"><input ref={fileRef} className="visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectRestore(file); }} /><button type="button" disabled={restorePending} onClick={() => fileRef.current?.click()} data-smart-hover>Select native archive</button>{restoreFile && <div className="archive-metadata"><span>File</span><strong>{restoreFile.name.replace(/[\\/\u0000-\u001f]/g, "_")}</strong><span>Size</span><strong>{(restoreFile.size / 1024).toFixed(1)} KiB</strong>{inspection && <><span>Schema</span><strong>{inspection.schema}</strong><span>Created</span><strong>{inspection.created_at ? localDate(inspection.created_at, values) : "Unknown"}</strong><span>Sessions</span><strong>{inspection.session_count}</strong><span>Mode</span><strong>Replace current Chronos state</strong></>}</div>}{restoreFile && !inspection && !restoreError && <p className="form-hint">Validating archive structure and checksum…</p>}{restoreError && <p className="inline-error" role="alert">{restoreError}</p>}<div className="form-actions"><button type="button" disabled={restorePending} onClick={closeRestore} data-smart-hover>Cancel</button><button type="button" className="danger-button" disabled={!inspection || restorePending} onClick={() => void restore()} data-smart-hover>{restorePending ? "Restoring..." : "Restore and replace"}</button></div></div></Overlay>}
 

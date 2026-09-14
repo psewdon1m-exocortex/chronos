@@ -31,7 +31,7 @@ const SECTIONS = [
       <>
         <p>On Dashboard, activate a category to start its timer. Selecting another category closes the current session and starts the new one at the same timestamp. Selecting the active category stops it.</p>
         <h3>Undo</h3>
-        <p><code>Undo last action</code> restores the state immediately before the most recent timer, edit, manual entry or deletion action. Only the latest action is retained for undo.</p>
+        <p><code>Undo last action</code> restores the state immediately before the most recent available timer, edit, manual entry or deletion action. Retained history is bounded to 30 days and 10,000 actions.</p>
         <h3>Overlaps</h3>
         <p>Chronos prevents overlapping sessions. Manual entries and edits must fit into an unoccupied interval.</p>
       </>
@@ -66,7 +66,7 @@ const SECTIONS = [
     title: "Telegram",
     content: (
       <>
-        <p>Telegram transport and identity binding are owned by Gryphon. After the host CLI connects one or more bots, <strong>Link Chronos function</strong> in Settings selects one from that Gryphon-owned pool. When the function is connected but no Telegram account is linked, <strong>Initialize bot</strong> creates the same one-time <code>/link</code> challenge as the host CLI. The same card manages verified Gryphon Linux updates through Updater.</p>
+        <p>Telegram transport and identity binding are owned by Gryphon. Initialize Gryphon and register a bot in Settings, then use <strong>Link Chronos function</strong> to select it. When the function is connected but no Telegram account is linked, <strong>Initialize bot</strong> creates a one-time <code>/link</code> challenge. The same card manages verified Gryphon Linux updates through Updater.</p>
         <h3>Commands</h3>
         <pre><code>{`/chronos status              active timer\n/chronos stats               today\n/chronos week                current week\n/chronos month               current month\n/chronos stop                stop active timer\n/chronos undo                undo last timer action\n/chronos retype              change the last completed session category\n/chronos backfill MINUTES    insert a completed session for the last N minutes`}</code></pre>
         <p>Retyping offers the four fixed category buttons. Backfill asks for whole minutes, then a category. It inserts a completed session, trims or removes overlapped entries, and preserves any active timer with the overlapped time deducted.</p>
@@ -80,11 +80,17 @@ const SECTIONS = [
     title: "Data, backup and updates",
     content: (
       <>
-        <p>PostgreSQL is the authoritative store for Chronos sessions, card order and navigation order. Gryphon independently owns Telegram bindings. A Chronos backup never includes the Access Key or service tokens.</p>
+        <p>PostgreSQL is the authoritative store for Chronos sessions, card order and navigation order. Gryphon independently owns Telegram bindings. A Chronos backup includes the Access Key verifier and retained Undo/command history; it excludes plaintext keys and service tokens. Restore signs out all sessions and retains the target machine enrollment.</p>
         <p>Kernel Register supplies the repository and public domain with a validated last-known-good cache. The local Updater creates another backup before replacing the immutable Chronos image and can restore it after rollback.</p>
       </>
     ),
     search: "postgresql backup restore kernel register updater release rollback security",
+  },
+  {
+    id: "operations",
+    title: "Deployment and connection checks",
+    content: <><p>Part 12: a running process does not prove that connections work. Check Kernel readiness, agent enrollment, last seen, last successful backup and next due separately. Saturn owns backup schedules. A delayed or unknown measurement is not zero.</p><p>If an update fails, retain its job ID and redacted logs, check rollback status and core readiness. Complete public DNS/TLS and a downloaded-backup restore drill after changes. Do not share access keys or tokens in incident logs.</p></>,
+    search: "Part 12 deployment health readiness unknown stale overdue backup bootstrap rollback token incident",
   },
 ];
 

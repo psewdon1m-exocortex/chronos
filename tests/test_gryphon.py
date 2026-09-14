@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -13,6 +14,11 @@ from app.updater import UpdaterClient
 class FakeStore:
     def __init__(self) -> None:
         self.responses: dict[str, dict[str, Any]] = {}
+        self.pool = self
+
+    @asynccontextmanager
+    async def command(self):
+        yield
 
     async def begin_gryphon_event(self, event_id: str):
         return self.responses.get(event_id)

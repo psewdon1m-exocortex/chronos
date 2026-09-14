@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import uvicorn
 
@@ -18,11 +19,10 @@ def run() -> None:
         host="0.0.0.0",
         port=config.listen_port,
         proxy_headers=config.trust_proxy,
-        forwarded_allow_ips="*" if config.trust_proxy else "127.0.0.1",
+        forwarded_allow_ips=os.getenv("CHRONOS_TRUSTED_PROXY_IPS", "127.0.0.1,::1"),
         access_log=True,
     )
 
 
 if __name__ == "__main__":
     run()
-
