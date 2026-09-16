@@ -4,6 +4,7 @@ import { api, downloadFile } from "../api";
 import { applyTheme, localDate } from "../format";
 import type { AuditEvent, SettingsResponse, SettingsValues } from "../types";
 import { EmptyState, LoadingBlock, Overlay, StatusSquare, SubmitButton, UniversalCard, useNotices } from "../ui";
+import { startUpdateWithLocalBackup } from "../updateFlow";
 
 type SettingsKey = SettingsValues["settings_order"][number];
 const DEFAULT_ORDER: SettingsKey[] = ["appearance", "security", "backup", "gryphon", "updates", "logs", "personalization"];
@@ -118,6 +119,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [updateOpen, setUpdateOpen] = useState(false);
   const [release, setRelease] = useState<ReleaseCheck | null>(null);
   const [updatePending, setUpdatePending] = useState(false);
+  const [updateOperation, setUpdateOperation] = useState<"check" | "apply" | null>(null);
   const [job, setJob] = useState<Record<string, unknown> | null>(null);
   const [jobId, setJobId] = useState("");
   const [dragged, setDragged] = useState<SettingsKey | null>(null);
@@ -405,29 +407,29 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   };
 
   const checkUpdate = async () => {
-    setUpdatePending(true); setRelease(null);
+    setUpdatePending(true); setUpdateOperation("check"); setRelease(null);
     try {
       setRelease(await api<ReleaseCheck>("/api/updates/check", { method: "POST" }));
     } catch (error) {
       notify("error", error instanceof Error ? error.message : "Release verification failed.");
     } finally {
-      setUpdatePending(false);
+      setUpdatePending(false); setUpdateOperation(null);
     }
   };
 
   const openUpdate = () => { setUpdateOpen(true); void checkUpdate(); };
   const applyUpdate = async () => {
     if (!release?.available_version) return;
-    setUpdatePending(true);
+    setUpdatePending(true); setUpdateOperation("apply");
     try {
-      const result = await api<Record<string, unknown>>("/api/updates/apply", { method: "POST", body: JSON.stringify({ version: release.available_version }) });
+      const { backupFilename, job: result } = await startUpdateWithLocalBackup(release.available_version);
       const id = String(result.job_id ?? result.id ?? "");
       setJob(result); setJobId(id);
-      notify("info", `Update ${release.available_version} started.`);
+      notify("info", `${backupFilename} downloaded. Update ${release.available_version} started.`);
     } catch (error) {
-      notify("error", error instanceof Error ? error.message : "Update could not be started.");
+      notify("error", error instanceof Error ? error.message : "Local backup or update could not be started.");
     } finally {
-      setUpdatePending(false);
+      setUpdatePending(false); setUpdateOperation(null);
     }
   };
 
@@ -553,7 +555,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
 
     {restoreOpen && <Overlay title="Restore Chronos snapshot" onClose={closeRestore} dismissible={!restoreFile && !restorePending}><div className="restore-flow"><input ref={fileRef} className="visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectRestore(file); }} /><button type="button" disabled={restorePending} onClick={() => fileRef.current?.click()} data-smart-hover>Select native archive</button>{restoreFile && <div className="archive-metadata"><span>File</span><strong>{restoreFile.name.replace(/[\\/\u0000-\u001f]/g, "_")}</strong><span>Size</span><strong>{(restoreFile.size / 1024).toFixed(1)} KiB</strong>{inspection && <><span>Schema</span><strong>{inspection.schema}</strong><span>Created</span><strong>{inspection.created_at ? localDate(inspection.created_at, values) : "Unknown"}</strong><span>Sessions</span><strong>{inspection.session_count}</strong><span>Mode</span><strong>Replace current Chronos state</strong></>}</div>}{restoreFile && !inspection && !restoreError && <p className="form-hint">Validating archive structure and checksum…</p>}{restoreError && <p className="inline-error" role="alert">{restoreError}</p>}<div className="form-actions"><button type="button" disabled={restorePending} onClick={closeRestore} data-smart-hover>Cancel</button><button type="button" className="danger-button" disabled={!inspection || restorePending} onClick={() => void restore()} data-smart-hover>{restorePending ? "Restoring..." : "Restore and replace"}</button></div></div></Overlay>}
 
-    {updateOpen && <Overlay title="Chronos update discovery" onClose={() => setUpdateOpen(false)} dismissible={!updatePending}><div className="update-flow"><div className="service-status-row"><span>Installed version</span><strong>{updates?.installed_version ?? data.runtime.version}</strong></div><div className="service-status-row"><span>Approved registry</span><strong>{data.runtime.register_revision ?? "Offline / no last-known revision"}</strong></div><div className="service-status-row"><span>Local updater</span><strong>{updates?.updater.available ? "Available" : "Unavailable"}</strong></div>{updatePending && <p className="form-hint">Checking and verifying the approved release source…</p>}{release && <div className="release-result"><strong>{release.update_available ? `Verified release ${release.available_version} is available` : "Installed release is up to date"}</strong>{release.published_at && <span>Published {localDate(release.published_at, values)}</span>}{release.release_url && <a href={release.release_url} target="_blank" rel="noreferrer">Open release notes</a>}</div>}{job && <pre className="job-state">{JSON.stringify(job, null, 2)}</pre>}<div className="form-actions"><button type="button" disabled={updatePending} onClick={() => setUpdateOpen(false)} data-smart-hover>Close</button><button type="button" disabled={updatePending} onClick={() => void checkUpdate()} data-smart-hover>Check again</button>{release?.update_available && <button type="button" disabled={updatePending || !updates?.updater.available} onClick={() => void applyUpdate()} data-smart-hover>Update to {release.available_version}</button>}</div></div></Overlay>}
+    {updateOpen && <Overlay title="Chronos update discovery" onClose={() => setUpdateOpen(false)} dismissible={!updatePending}><div className="update-flow"><div className="service-status-row"><span>Installed version</span><strong>{updates?.installed_version ?? data.runtime.version}</strong></div><div className="service-status-row"><span>Approved registry</span><strong>{data.runtime.register_revision ?? "Offline / no last-known revision"}</strong></div><div className="service-status-row"><span>Local updater</span><strong>{updates?.updater.available ? "Available" : "Unavailable"}</strong></div>{updateOperation === "check" && <p className="form-hint">Checking and verifying the approved release source…</p>}{updateOperation === "apply" && <p className="form-hint">Downloading the local backup before the update starts…</p>}{release && <div className="release-result"><strong>{release.update_available ? `Verified release ${release.available_version} is available` : "Installed release is up to date"}</strong>{release.published_at && <span>Published {localDate(release.published_at, values)}</span>}{release.release_url && <a href={release.release_url} target="_blank" rel="noreferrer">Open release notes</a>}</div>}{job && <pre className="job-state">{JSON.stringify(job, null, 2)}</pre>}<div className="form-actions"><button type="button" disabled={updatePending} onClick={() => setUpdateOpen(false)} data-smart-hover>Close</button><button type="button" disabled={updatePending} onClick={() => void checkUpdate()} data-smart-hover>Check again</button>{release?.update_available && <button type="button" disabled={updatePending || !updates?.updater.available} onClick={() => void applyUpdate()} data-smart-hover>Download backup and update to {release.available_version}</button>}</div></div></Overlay>}
 
     {neptuneOpen && <Overlay title="Initialize Neptune" onClose={() => !neptunePending && setNeptuneOpen(false)} dismissible={!neptuneCode && !neptunePending}><form className="form-grid" onSubmit={initializeNeptune}><p className="form-hint">Create a one-time Linux pipeline code in Saturn → Synchronization. It is sent directly to the local Updater and is never stored by Chronos.</p><label><span>Saturn setup code</span><input value={neptuneCode} minLength={32} maxLength={32} autoComplete="off" required onChange={(event) => setNeptuneCode(event.target.value.trim())} /></label><div className="form-actions"><button type="button" disabled={neptunePending} onClick={() => { setNeptuneOpen(false); setNeptuneCode(""); }} data-smart-hover>Cancel</button><SubmitButton pending={neptunePending} label="Initialize" pendingLabel="Starting…" /></div></form></Overlay>}
 

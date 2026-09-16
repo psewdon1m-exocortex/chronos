@@ -170,6 +170,9 @@ Chronos requires the additive typed profile in [app/deployment-profile.json](app
 
 - GET /api/updates/status and POST /api/updates/check.
 - POST /api/updates/apply; authenticated GET /api/updates/jobs/{job_id}.
+- The web update flow downloads an operator-held ZIP before calling apply. A
+  failed local download prevents the update request; Updater still stores its
+  separate checksummed rollback copy on the target host.
 - POST /api/internal/updater/restore is a token-protected host-local callback.
 
 ## Main API

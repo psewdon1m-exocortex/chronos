@@ -222,7 +222,7 @@ export const DOCUMENTATION_ARTICLES: DocumentationArticle[] = [
     content: (
       <>
         <h2>Release path</h2>
-        <p>Kernel Register supplies the repository and public-domain configuration. Updater verifies a release, creates a pre-update backup and replaces the immutable Chronos image.</p>
+        <p>Kernel Register supplies the repository and public-domain configuration. Before an update starts, Chronos downloads a backup archive to the local device. Updater separately retains its rollback copy, verifies the release and replaces the immutable Chronos image.</p>
         <h2>Connection states</h2>
         <p>Read readiness, enrollment, last seen and last successful operation as separate facts. <strong>Unknown</strong>, <strong>stale</strong> and <strong>overdue</strong> are not equivalent to zero or healthy.</p>
         <h2>Failure recovery</h2>

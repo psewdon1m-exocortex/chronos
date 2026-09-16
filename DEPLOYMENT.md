@@ -1,6 +1,6 @@
 # Deploying chronos
 
-This runbook applies to the next signed chronos-v0.1.2 release. Source changes are not a published release. Start only after the exact immutable tag, anonymous assets, signature and Part 12 report pass CI.
+This runbook applies to the next signed chronos-v0.1.3 release. Source changes are not a published release. Start only after the exact immutable tag, anonymous assets, signature and Part 12 report pass CI.
 
 ## Ownership and release order
 
@@ -13,7 +13,7 @@ The operator explicitly authorized this head profile on 2026-09-14. Its additive
 Record hostname, working directory and installed agent versions before changes. Prepare Docker Compose v2, curl, OpenSSL, Python 3 and server nginx yourself. DNS egress, github.com/release-assets.githubusercontent.com, ghcr.io and the Kernel/Saturn HTTPS origins must be reachable. No incoming application port is public.
 
 ```bash
-curl -fsSL https://github.com/psewdon1m-exocortex/chronos/releases/download/chronos-v0.1.2/bootstrap.sh | sudo sh
+curl -fsSL https://github.com/psewdon1m-exocortex/chronos/releases/download/chronos-v0.1.3/bootstrap.sh | sudo sh
 sudoedit /opt/exocortex/chronos/.env
 sudo chmod 600 /opt/exocortex/chronos/.env
 sudo chronos-install
