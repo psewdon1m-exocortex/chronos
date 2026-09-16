@@ -36,7 +36,6 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "uptime",
         "current",
         "today",
-        "recent",
     ],
     "settings_order": [
         "appearance",

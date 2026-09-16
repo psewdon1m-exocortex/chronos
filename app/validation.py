@@ -44,6 +44,8 @@ def validate_settings(data: dict[str, Any] | SettingsInput) -> dict[str, Any]:
     for key, pattern in {"daily_summary_time": r"(?:[01]\d|2[0-3]):[0-5]\d", "theme_accent": r"#[0-9a-fA-F]{6}"}.items():
         if key in values and not re.fullmatch(pattern, values[key]):
             raise ValueError(f"Invalid {key}")
+    if "dashboard_order" in values and set(values["dashboard_order"]) == {*DEFAULT_SETTINGS["dashboard_order"], "recent"}:
+        values["dashboard_order"] = [item for item in values["dashboard_order"] if item != "recent"]
     for key in ("navigation_order", "dashboard_order", "settings_order"):
         if key in values and (len(values[key]) != len(DEFAULT_SETTINGS[key]) or set(values[key]) != set(DEFAULT_SETTINGS[key])):
             raise ValueError(f"Invalid {key}")

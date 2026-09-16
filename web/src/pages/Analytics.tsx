@@ -177,7 +177,7 @@ export default function Analytics({ settings }: { settings?: SettingsValues }) {
                         ) : null;
                       })}
                     </div>
-                    <span>{day.date.slice(5)}</span>
+                    <time dateTime={day.date}>{day.date.slice(5)}</time>
                   </div>
                 ))}
               </div>

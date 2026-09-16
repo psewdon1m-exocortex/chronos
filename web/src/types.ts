@@ -72,7 +72,7 @@ export interface SettingsValues {
   theme_accent: string;
   sidebar_auto_hide: boolean;
   navigation_order: Array<"dashboard" | "timeline" | "analytics" | "settings">;
-  dashboard_order: Array<"cpu" | "ram" | "disk" | "uptime" | "current" | "today" | "recent">;
+  dashboard_order: Array<"cpu" | "ram" | "disk" | "uptime" | "current" | "today">;
   settings_order: Array<
     "appearance" | "security" | "backup" | "gryphon" | "updates" | "logs" | "personalization"
   >;

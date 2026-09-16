@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api";
-import { bytes, CATEGORY_DESCRIPTIONS, duration, liveSeconds, localDate } from "../format";
+import { bytes, CATEGORY_DESCRIPTIONS, duration, liveSeconds } from "../format";
 import type { Category, DashboardData, Session, SettingsValues } from "../types";
-import { EmptyState, LoadingBlock, StatusSquare, UniversalCard, useNotices } from "../ui";
+import { LoadingBlock, StatusSquare, UniversalCard, useNotices } from "../ui";
 
 type DashboardKey = SettingsValues["dashboard_order"][number];
-const DEFAULT_ORDER: DashboardKey[] = ["cpu", "ram", "disk", "uptime", "current", "today", "recent"];
+const DEFAULT_ORDER: DashboardKey[] = ["cpu", "ram", "disk", "uptime", "current", "today"];
 
 interface DashboardProps {
   settings?: SettingsValues;
@@ -249,22 +249,6 @@ export default function Dashboard({ settings, onSettingsChanged }: DashboardProp
             </div>
           ))}
         </div>
-      </UniversalCard>
-    ),
-    recent: (
-      <UniversalCard ordinal={ordinal("recent")} title="RECENT" span="4x" {...dragProps("recent")}>
-        <div className="recent-command"><h3>Session stream</h3></div>
-        {data.recent.length ? <div className="session-compact-list">
-          {data.recent.map((session) => (
-            <div className="session-compact-row" key={session.id}>
-              <span className="session-state">{session.active ? "LIVE" : session.source.toUpperCase()}</span>
-              <strong>{session.label}</strong>
-              <span>{session.public_id} / {session.note || "No note"}</span>
-              <span>{duration(session.active ? liveSeconds(session.timer_elapsed_seconds, elapsedSinceSync) : session.duration_seconds)}</span>
-              <time>{localDate(session.started_at, settings)}</time>
-            </div>
-          ))}
-        </div> : <EmptyState>No sessions have been recorded yet.</EmptyState>}
       </UniversalCard>
     ),
   };

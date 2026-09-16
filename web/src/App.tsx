@@ -31,6 +31,7 @@ function validOrder(value: unknown): Destination[] {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>("dashboard");
   const [settings, setSettings] = useState<SettingsValues | undefined>();
+  const [runtimeVersion, setRuntimeVersion] = useState("current");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dragged, setDragged] = useState<Destination | null>(null);
@@ -41,6 +42,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     try {
       const response = await api<SettingsResponse>("/api/settings");
       setSettings(response.values);
+      setRuntimeVersion(response.runtime.version);
       applyTheme(response.values.theme_accent);
     } catch (error) {
       notify("error", error instanceof Error ? error.message : "Personalization could not be loaded.");
@@ -119,7 +121,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const title = view === "documentation" ? "Documentation" : DESTINATIONS.find((item) => item.key === view)?.label ?? "Chronos";
+  const title = view;
 
   return (
     <div className={`app-shell ${fixed ? "sidebar-fixed" : ""}`}>
@@ -178,7 +180,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           {view === "timeline" && <Timeline settings={settings} />}
           {view === "analytics" && <Analytics settings={settings} />}
           {view === "settings" && <Settings settings={settings} onSettingsChanged={setSettings} />}
-          {view === "documentation" && <Documentation />}
+          {view === "documentation" && <Documentation version={runtimeVersion} />}
         </div>
       </main>
     </div>
