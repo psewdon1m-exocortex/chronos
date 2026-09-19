@@ -90,6 +90,8 @@ jobs:
           python3 scripts/verify-release-manifest.py .release-inputs/updater-release.json .release-inputs/updater-release.json.sig.json .release/updater-public-key.pem
           python3 scripts/verify-updater-bundle.py .release-inputs "$updater_version"
           (cd .release-inputs && sha256sum -c "updater-${updater_version}-install.tar.gz.sha256")
+          printf '%s  %s\n' "$(tr -d '[:space:]' < .release/updater.sha256)" "updater-${updater_version}-install.tar.gz" > .release-inputs/updater-pinned.sha256
+          (cd .release-inputs && sha256sum -c updater-pinned.sha256)
           tar -xzf ".release-inputs/updater-${updater_version}-install.tar.gz" -C .release-inputs
 
       - uses: docker/login-action@v3

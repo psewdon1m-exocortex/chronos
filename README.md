@@ -219,3 +219,7 @@ See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
 The UI uses Updater **0.5.0**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
+
+Release builds pin the published Updater 0.5.0 installer by the SHA-256 in
+`.release/updater.sha256` and verify it before extraction. This digest was
+verified against the production-signed Updater manifest and existing trust key.
