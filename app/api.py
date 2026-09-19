@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .update_flow import mount_update_flow
+
 import asyncio
 import csv
 from contextlib import asynccontextmanager, suppress
@@ -440,7 +442,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Chronos",
-        version="0.1.3",
+        version="0.2.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -1310,21 +1312,7 @@ def create_app() -> FastAPI:
         body: UpdateInput,
         _: dict[str, Any] = Depends(mutation_operator),
     ):
-        backup = await request.app.state.store.logical_backup()
-        backup_data = _backup_zip(backup, request.app.state.runtime.config.version)
-        result = await request.app.state.updater.create_update(
-            version=body.version,
-            backup_name=f"chronos-backup-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.zip",
-            backup_data=backup_data,
-        )
-        await request.app.state.store.audit(
-            status="success",
-            action="update.started",
-            target=body.version,
-            actor="operator",
-            message="Chronos update handed to local Updater",
-        )
-        return result
+        raise HTTPException(426, "Use the Updates dialog to save and return the same pre-update ZIP")
 
     @app.get("/api/updates/jobs/{job_id}")
     async def update_job(
@@ -1347,6 +1335,13 @@ def create_app() -> FastAPI:
             message="Chronos rollback handed to local Updater",
         )
         return result
+
+    async def update_backup(request: Request):
+        backup = await request.app.state.store.logical_backup()
+        archive = _backup_zip(backup, request.app.state.runtime.config.version)
+        return archive, f"chronos-backup-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.zip"
+
+    mount_update_flow(app, operator, mutation_operator, update_backup)
 
     web_dir = Path(__file__).resolve().parents[1] / "web" / "dist"
     assets_dir = web_dir / "assets"

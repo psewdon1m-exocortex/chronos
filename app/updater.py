@@ -81,6 +81,9 @@ class UpdaterClient:
         finally:
             connection.close()
 
+    async def request(self, method: str, route: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._request, method, route, body, True, 90)
+
     async def status(self) -> dict[str, Any]:
         try:
             value = await asyncio.to_thread(self._request, "GET", "/v1/health")
@@ -239,7 +242,7 @@ async def check_github_release(
             continue
         version = tag[len(service) + 2 :]
         parsed_version = _version_tuple(version)
-        if parsed_version:
+        if parsed_version and re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
             candidates.append((parsed_version, release, version))
     candidates.sort(key=lambda item: item[0], reverse=True)
     available = candidates[0] if candidates else None

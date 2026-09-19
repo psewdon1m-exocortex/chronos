@@ -69,7 +69,7 @@ for term in ["server_name", "ssl_certificate_key", "client_max_body_size", "prox
     assert term in nginx,term
 policy=json.loads((root/".release/known-problems-policy.json").read_text())
 assert len(policy["checks"])==88 and len(policy["catalog_revision"])==40
-assert (root/".release/updater.version").read_text().strip()=="0.4.6"
+assert (root/".release/updater.version").read_text().strip()=="0.5.0"
 for script in ["install.sh", "bootstrap.sh" if service=="chronos" else "scripts/bootstrap.sh"]:
     subprocess.run(["sh","-n",str(root/script)],check=True)
 print(json.dumps({"service":service,"version":version,"result":"PASS","scope":"rendered head Compose, own installer/env/trust, operator activation and nginx templates","production_activation":"NOT_RUN"}))

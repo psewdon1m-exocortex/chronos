@@ -169,10 +169,10 @@ Chronos requires the additive typed profile in [app/deployment-profile.json](app
 ## Updater contract
 
 - GET /api/updates/status and POST /api/updates/check.
-- POST /api/updates/apply; authenticated GET /api/updates/jobs/{job_id}.
-- The web update flow downloads an operator-held ZIP before calling apply. A
-  failed local download prevents the update request; Updater still stores its
-  separate checksummed rollback copy on the target host.
+- `/api/update-flow/check`, `/backup`, `/install/{component}` and `/jobs` implement
+  the saved-copy protocol. The old `/api/updates/apply` route returns 426.
+- The same standard ZIP is downloaded and returned for installation; Updater keeps
+  rollback bytes only in RAM and requires the saved ZIP after a restart.
 - POST /api/internal/updater/restore is a token-protected host-local callback.
 
 ## Main API
@@ -212,3 +212,10 @@ Chronos keeps the returned plaintext only in process memory.
 
 - Multi-user support (current build is single-operator only).
 - Optional SSO and external telemetry.
+
+## Unified updates (protocol 2)
+
+See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
+The UI uses Updater **0.5.0**, an exact selected version, the standard ZIP saved
+on the operator PC, and durable status/progress. Helper updates use the same
+dialog without a backup. No update ZIP is retained on the application host.

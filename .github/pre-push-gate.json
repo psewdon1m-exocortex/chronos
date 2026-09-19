@@ -18,6 +18,8 @@
       "evidence": [
         "README.md",
         "app/updater.py",
+        "app/update_flow.py",
+        "tests/test_update_flow.py",
         "tests/test_api.py"
       ]
     },
