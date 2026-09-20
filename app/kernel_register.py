@@ -214,6 +214,7 @@ def _resolve_kernel_values(
     keys: list[str],
     *,
     opener=urlopen,
+    public_only=False,
 ) -> dict[str, str]:
     remote_url = config.kernel_url.rstrip("/")
     request = Request(
@@ -237,6 +238,8 @@ def _resolve_kernel_values(
             raise KernelRegisterError("Kernel returned an unsupported resolution response")
         resolved: dict[str, str] = {}
         for key in keys:
+            if public_only and payload["values"][key].get("secret") is not False:
+                raise KernelRegisterError("A management destination must be a public Register value")
             value = payload["values"][key]["value"]
             if not isinstance(value, str):
                 raise KernelRegisterError("Kernel returned an unsupported resolution response")
@@ -254,6 +257,21 @@ def _resolve_kernel_values(
         KernelRegisterError,
     ) as error:
         raise KernelRegisterError("Kernel value resolution failed") from error
+
+
+def resolve_management(config: RuntimeConfig, service: str) -> str:
+    from urllib.request import HTTPRedirectHandler, build_opener
+    if service != "gryphon":
+        raise KernelRegisterError("Unsupported management scope")
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    key = f"services.{service}.management_url"
+    value = _resolve_kernel_values(config, [key], opener=build_opener(NoRedirect).open, public_only=True)[key]
+    parsed = urlparse(value)
+    if len(value) > 2048 or parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise KernelRegisterError("Invalid management destination")
+    return value
 
 
 def _replace_resolved(values: dict[str, Any], resolved: dict[str, str]) -> dict[str, Any]:

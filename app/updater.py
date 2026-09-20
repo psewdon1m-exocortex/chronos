@@ -144,13 +144,13 @@ class UpdaterClient:
         return await asyncio.to_thread(self._request, "POST", f"/v1/lifecycle/{kind}",
             {"head_id": self.head_id, **fields}, True, 30)
 
-    async def initialize_neptune(self, enrollment_code: str, export_url: str) -> dict[str, Any]:
+    async def initialize_neptune(self, enrollment_code: str, export_url: str, request_id: str | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._request,
             "POST",
             "/v1/components/neptune-linux/initialize",
             {
-                "request_id": str(uuid4()),
+                "request_id": request_id or str(uuid4()),
                 "head_id": self.head_id,
                 "project_id": "chronos",
                 "export_url": export_url,

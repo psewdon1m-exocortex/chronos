@@ -64,6 +64,8 @@ export function openUpdateOverlay(options) {
     box.append(element("p", "GitHub release identity and semantic version are checked here. Artifact digests and health are verified by the privileged updater during installation.", "muted"));
     if (discovery?.release_url) { try { const url = new URL(discovery.release_url); if (url.protocol === "https:" && url.hostname === "github.com") { const link = element("a", "Release notes"); link.href = url.href; link.target = "_blank"; link.rel = "noopener noreferrer"; box.append(link); } } catch { /* invalid metadata is never used as a link */ } }
     c.append(box);
+    if (component !== service) c.append(element("p",
+      "This updates the shared " + label + " instance on this host and may briefly interrupt every connected application. Install confirms this shared impact. No application backup is required.", "shared-impact"));
     const actions = element("div", undefined, "actions");
     const again = button("Check again", () => void check()); again.disabled = checking || installing || active(); actions.append(again);
     if (discovery?.update_available) { const install = button(`Install ${discovery.available_version}`, () => component === service ? backupWarning(discovery.available_version) : void installHelper(discovery.available_version)); install.disabled = checking || installing || active(); actions.append(install); }
@@ -73,9 +75,16 @@ export function openUpdateOverlay(options) {
       const status = element("section", undefined, "box job"); status.setAttribute("aria-live", "polite");
       status.append(meta([["State", job?.state ?? "REQUESTED"], ["Job", job?.id ?? "Waiting for acknowledgement"], ["Message", job?.message ?? "Submitting the selected release"]]));
       const progress = element("progress"); progress.max = 1; progress.setAttribute("aria-label", "Update progress");
+      const measurement = job?.progress;
+      const measured = measurement?.mode === "determinate" && Number.isFinite(measurement.completed)
+        && Number.isFinite(measurement.total) && measurement.total > 0
+        && measurement.completed >= 0 && measurement.completed <= measurement.total;
       if (job && terminal.has(job.state)) progress.value = ["COMPLETED", "ROLLED_BACK"].includes(job.state) ? 1 : 0;
+      else if (measured) progress.value = measurement.completed / measurement.total;
       status.append(progress);
-      if (job && !terminal.has(job.state)) status.append(element("p", "This phase does not report a measured percentage. Status refreshes automatically.", "muted"));
+      if (job && !terminal.has(job.state)) status.append(element("p", measured
+        ? String(measurement.completed) + " / " + String(measurement.total) + " · " + (measurement.phase || job.state)
+        : "This phase does not report a measured percentage. Status refreshes automatically.", "muted"));
       if (connection) status.append(element("p", connection, "error"));
       c.append(status);
       if (job && terminal.has(job.state) && job.rollback_available && component === service) rollbackControls(c);
@@ -112,7 +121,7 @@ export function openUpdateOverlay(options) {
     installing = true; error = ""; job = undefined; remember({ request_id: requestID }); render();
     try {
       job = archive ? await json(`/install/${component}`, "POST", archive, { "Content-Type": "application/octet-stream", "X-Update-Receipt": receipt, "X-Update-Saved": "1" })
-        : await json(`/install/${component}`, "POST", { version, request_id: requestID });
+        : await json(`/install/${component}`, "POST", { version, request_id: requestID, ...(component === "wyvern" ? { confirm_shared: true } : {}) });
       remember({ id: job.id, request_id: requestID }); void poll();
     } catch (failure) { error = `${failure.message}. Checking whether the updater accepted the request…`; await recover(); }
     finally { installing = false; render(); }

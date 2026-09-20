@@ -11,6 +11,7 @@ import asyncpg
 
 from .constants import DEFAULT_SETTINGS
 from .security import hash_password
+from .backup_policy import JOURNAL_KEY, restored_record
 from .validation import validate_settings, validate_session
 from .transactions import TransactionPool
 
@@ -352,10 +353,12 @@ class Store:
             await connection.execute("delete from undo_actions where id not in (select id from undo_actions order by id desc limit 10000)")
 
     async def audit_events(
-        self, limit: int = 200, *, after_id: int | None = None
+        self, limit: int = 200, *, after_id: int | None = None, before_id: int | None = None
     ) -> list[dict[str, Any]]:
         async with self.pool.acquire() as connection:
-            if after_id is None:
+            if before_id is not None:
+                rows = await connection.fetch("select id,status,action,target,actor,message,details,request_id,created_at from audit_events where id < $1 order by id desc limit $2", max(1, before_id), max(1, min(limit, 10000)))
+            elif after_id is None:
                 rows = await connection.fetch(
                     """
                     select id, status, action, target, actor, message, details,
@@ -394,12 +397,25 @@ class Store:
             for row in rows
         ]
 
+    async def backup_policy_pending(self):
+        async with self.pool.acquire() as connection:
+            value = await connection.fetchval("select value from app_settings where key=$1", JOURNAL_KEY)
+        return _json_value(value) if value else None
+
+    async def set_backup_policy_pending(self, value, *, expected_request_id=None):
+        async with self.pool.acquire() as connection:
+            if expected_request_id is not None:
+                result = await connection.execute("update app_settings set value=$2::jsonb,updated_at=now() where key=$1 and value->>'requestId'=$3", JOURNAL_KEY, json.dumps(value), expected_request_id)
+                return result == "UPDATE 1"
+            await connection.execute("insert into app_settings(key,value) values($1,$2::jsonb) on conflict(key) do update set value=excluded.value,updated_at=now()", JOURNAL_KEY, json.dumps(value))
+            return True
+
     async def logical_backup(self) -> dict[str, Any]:
         async with self.pool.acquire() as connection:
             async with connection.transaction(isolation="repeatable_read", readonly=True):
                 owner = await self.owner(connection)
                 rows = await connection.fetch("select * from time_sessions where user_id=$1 order by id", owner["id"])
-                settings = {row["key"]: _json_value(row["value"]) for row in await connection.fetch("select key,value from app_settings")}
+                settings = {row["key"]: _json_value(row["value"]) for row in await connection.fetch("select key,value from app_settings where key != $1", JOURNAL_KEY)}
                 security = dict(await connection.fetchrow("select password_hash, session_generation from operator_security where id=1"))
                 kernel_url = await connection.fetchval("select kernel_url from service_credentials where id=1")
                 undo = [dict(row) for row in await connection.fetch(
@@ -428,6 +444,7 @@ class Store:
         }
 
     async def restore_backup(self, backup: dict[str, Any]) -> int:
+        policy = restored_record(backup.get("backup_policy"))
         if backup.get("schema") != "exocortex.chronos.backup.v1":
             raise ValueError("Unsupported Chronos backup schema")
         sessions = backup.get("sessions")
@@ -515,6 +532,7 @@ class Store:
                         item.get("timer_group_key"),
                         item.get("note", ""), item.get("source", "restore"), item["deleted_at"],
                     )
+                await connection.execute("insert into app_settings(key,value) values($1,$2::jsonb) on conflict(key) do update set value=excluded.value,updated_at=now()", JOURNAL_KEY, json.dumps(policy))
                 for key, value in settings.items():
                     await connection.execute(
                         """
@@ -548,6 +566,13 @@ class Store:
                 maximum = max([item["id"] for item in sessions] + [int(item["public_id"][2:]) for item in sessions] + [0])
                 await connection.execute("select setval(pg_get_serial_sequence('time_sessions','id'), $1, $2)", max(1, maximum), maximum > 0)
         return len(sessions)
+
+    async def mastermind_event(self, public_id: str):
+        owner = await self.owner()
+        async with self.pool.acquire() as connection:
+            return await connection.fetchrow(
+                "select started_at, stopped_at from time_sessions "
+                "where user_id=$1 and public_id=$2 and deleted_at is null", owner["id"], public_id)
 
     async def sessions_for_export(self) -> Iterable[asyncpg.Record]:
         owner = await self.owner()

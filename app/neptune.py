@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import http.client
 import json
 from pathlib import Path
@@ -17,11 +17,12 @@ class NeptuneError(RuntimeError):
         self.status = status
 
 
-@dataclass(frozen=True)
+@dataclass
 class NeptuneClient:
     socket_path: str
     project_id: str
     control_token_file: Path
+    last_known: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def _request(self, method: str, route: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.control_token_file.is_file():
@@ -44,7 +45,9 @@ class NeptuneClient:
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise NeptuneError("Neptune returned invalid JSON") from error
             if not 200 <= response.status < 300:
-                raise NeptuneError(str(result.get("error") or f"Neptune returned HTTP {response.status}"), 409 if response.status == 409 else 502)
+                error = NeptuneError(str(result.get("error") or f"Neptune returned HTTP {response.status}"), response.status if response.status in {400, 404, 409, 410, 413, 422, 426, 503} else 502)
+                error.upstream_status = response.status
+                raise error
             return result
         except (FileNotFoundError, ConnectionRefusedError, PermissionError) as error:
             raise NeptuneError("Neptune is not installed or is unavailable on this VPS", 503) from error
@@ -70,13 +73,22 @@ class NeptuneClient:
     async def availability(self) -> dict[str, Any]:
         try:
             health = await asyncio.to_thread(self._health)
-        except NeptuneError:
-            return {"installed": False, "linked": False, "state": "unavailable", "version": None}
+        except NeptuneError as error:
+            return {"installed": None, "linked": None, **self.last_known, "state": "unavailable", "error": str(error)}
         try:
             status = await self.status()
-            return {"installed": True, "linked": True, "state": "linked", **status}
-        except NeptuneError:
-            return {"installed": True, "linked": False, "state": "unlinked", "version": health.get("version")}
+            self.last_known = {**status, "installed": True, "linked": True, "state": "linked"}
+            return self.last_known
+        except NeptuneError as error:
+            upstream = getattr(error, "upstream_status", None)
+            state = "unlinked" if upstream == 404 else "authorization_failed" if upstream in {401, 403} else "unavailable"
+            return {"linked": None, **self.last_known, "installed": True, "state": state, "version": health.get("version"),
+                    **({"linked": False} if state == "unlinked" else {}), "error": str(error)}
+
+    async def policy(self, method="GET", body=None, suffix=""):
+        if method not in {"GET", "PUT", "POST"} or suffix not in {"", "/runs"}:
+            raise NeptuneError("Unsupported backup policy operation", 400)
+        return await asyncio.to_thread(self._request, method, "/policy" + suffix, body)
 
     async def status(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, "GET", "/status")

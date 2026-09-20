@@ -55,6 +55,7 @@ class RuntimeConfig:
     gryphon_adapter_url: str
     gryphon_timeout_seconds: float
     storage_path: Path | None = None
+    mastermind_reader_token_file: Path | None = None
 
     def with_register(
         self,
@@ -118,6 +119,7 @@ def load_config() -> RuntimeConfig:
         ),
         kernel_timeout_seconds=float(os.getenv("KERNEL_TIMEOUT_SEC", "3")),
         kernel_refresh_seconds=_integer("KERNEL_REFRESH_SEC", 60, 5),
+        mastermind_reader_token_file=Path(os.environ["MASTERMIND_READER_TOKEN_FILE"]) if os.getenv("MASTERMIND_READER_TOKEN_FILE") else None,
         repository_url=os.getenv("CHRONOS_REPOSITORY_URL", "").strip(),
         public_url=os.getenv("CHRONOS_PUBLIC_URL", "").strip(),
         register_revision="",

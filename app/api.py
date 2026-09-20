@@ -35,8 +35,10 @@ from .gryphon import (
     GryphonError,
     GryphonNotifier,
 )
-from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value, profile_missing
+from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value, profile_missing, resolve_management
+from .backup_policy import BackupPolicy
 from .neptune import NeptuneClient, NeptuneError
+from .mastermind_reader import install_mastermind_reader
 from .runtime import RuntimeState
 from .security import (
     create_session_token,
@@ -119,6 +121,7 @@ class NeptuneScheduleInput(BaseModel):
 
 
 class NeptuneInitializationInput(BaseModel):
+    request_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F-]{36}$")
     enrollment_code: str = Field(pattern=r"^[A-Za-z0-9_-]{32}$")
 
 
@@ -448,6 +451,7 @@ def create_app() -> FastAPI:
         openapi_url=None,
         lifespan=lifespan,
     )
+    install_mastermind_reader(app)
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -971,9 +975,21 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="Gryphon token is required")
         return await request.app.state.gryphon.handle(body)
 
+    def policy_for(request):
+        if not hasattr(request.app.state, "backup_policy"):
+            request.app.state.backup_policy = BackupPolicy(request.app.state.neptune, request.app.state.store,
+                lambda: request.app.state.runtime.config.neptune_control_token_file.is_file())
+        return request.app.state.backup_policy
+
+    async def current_backup(request):
+        intent = await policy_for(request).export_intent()
+        backup = await request.app.state.store.logical_backup()
+        backup["backup_policy"] = intent
+        return backup
+
     @app.get("/api/backup/export")
     async def export_backup(request: Request, _: dict[str, Any] = Depends(operator)):
-        backup = await request.app.state.store.logical_backup()
+        backup = await current_backup(request)
         archive = _backup_zip(backup, request.app.state.runtime.config.version)
         filename = f"chronos-backup-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.zip"
         await request.app.state.store.audit(
@@ -989,6 +1005,33 @@ def create_app() -> FastAPI:
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @app.head("/api/internal/neptune/backup")
+    async def neptune_export_ready(request: Request, authorization: str | None = Header(default=None)):
+        token_file = request.app.state.runtime.config.neptune_export_token_file
+        expected = token_file.read_text(encoding="utf-8").strip() if token_file.is_file() else ""
+        supplied = (authorization or "").removeprefix("Bearer ")
+        if not expected or not hmac.compare_digest(supplied, expected):
+            raise HTTPException(status_code=401, detail="Neptune export token is required")
+        async with request.app.state.store.pool.acquire() as connection:
+            await connection.fetchval("select 1")
+        return Response(status_code=204, headers={"X-Neptune-Ready": "1"})
+
+    @app.get("/api/neptune/policy")
+    async def read_backup_policy(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await policy_for(request).read()
+
+    @app.put("/api/neptune/policy")
+    async def change_backup_policy(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        return await policy_for(request).mutate(body)
+
+    @app.get("/api/neptune/policy/runs")
+    async def read_backup_runs(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await policy_for(request).runs()
+
+    @app.post("/api/neptune/policy/runs", status_code=202)
+    async def create_backup_run(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        return await policy_for(request).runs("POST", body)
+
     @app.post("/api/internal/neptune/backup")
     async def export_neptune_backup(request: Request, authorization: str | None = Header(default=None)):
         token_file = request.app.state.runtime.config.neptune_export_token_file
@@ -996,7 +1039,8 @@ def create_app() -> FastAPI:
         supplied = (authorization or "").removeprefix("Bearer ")
         if not expected or not hmac.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="Neptune export token is required")
-        backup = await request.app.state.store.logical_backup()
+        await policy_for(request).assert_export_ready()
+        backup = await current_backup(request)
         archive = _backup_zip(backup, request.app.state.runtime.config.version)
         checksum = hashlib.sha256(archive).hexdigest()
         return Response(
@@ -1023,7 +1067,7 @@ def create_app() -> FastAPI:
         config = request.app.state.runtime.config
         result = await request.app.state.updater.initialize_neptune(
             body.enrollment_code,
-            f"http://127.0.0.1:{config.listen_port}/api/internal/neptune/backup",
+            f"http://127.0.0.1:{config.listen_port}/api/internal/neptune/backup", body.request_id,
         )
         await request.app.state.store.audit(
             status="success", action="neptune.initialize", target=str(result.get("id") or "accepted"),
@@ -1033,11 +1077,11 @@ def create_app() -> FastAPI:
 
     @app.put("/api/neptune/schedule", status_code=204)
     async def neptune_schedule(request: Request, body: NeptuneScheduleInput, _: dict[str, Any] = Depends(mutation_operator)):
-        raise HTTPException(status_code=409, detail="Backup schedules are owned by Saturn → Synchronization")
+        raise HTTPException(status_code=426, detail="Use the versioned service backup policy")
 
     @app.post("/api/neptune/runs", status_code=202)
     async def neptune_run(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        raise HTTPException(status_code=409, detail="Remote backup runs are owned by Saturn → Synchronization")
+        raise HTTPException(status_code=426, detail="Use the versioned service backup run endpoint")
 
     @app.post("/api/neptune/update/check")
     async def neptune_update_check(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
@@ -1054,8 +1098,11 @@ def create_app() -> FastAPI:
         return await request.app.state.updater.update_neptune(requested_version)
 
     @app.post("/api/gryphon/initialize", status_code=202)
-    async def gryphon_initialize(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        return await request.app.state.updater.lifecycle("gryphon-initialization")
+    async def gryphon_initialize(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
+        request_id = body.get("request_id")
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-fA-F-]{36}", request_id):
+            raise HTTPException(status_code=400, detail="A stable initialization request ID is required")
+        return await request.app.state.updater.lifecycle("gryphon-initialization", request_id=request_id)
 
     @app.post("/api/updates/agent/install", status_code=202)
     async def updater_self_update(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
@@ -1064,6 +1111,13 @@ def create_app() -> FastAPI:
     @app.get("/api/gryphon/status")
     async def gryphon_status(request: Request, _: dict[str, Any] = Depends(operator)):
         return await request.app.state.gryphon_client.status()
+
+    @app.get("/api/gryphon/management")
+    async def gryphon_management(request: Request, _: dict[str, Any] = Depends(operator)):
+        try:
+            return {"url": await asyncio.to_thread(resolve_management, request.app.state.runtime.config, "gryphon")}
+        except KernelRegisterError:
+            raise HTTPException(503, "An authorized Gryphon management destination is not available in Kernel") from None
 
     @app.get("/api/gryphon/bots")
     async def gryphon_bots(request: Request, _: dict[str, Any] = Depends(operator)):
@@ -1107,6 +1161,19 @@ def create_app() -> FastAPI:
             status="success", action="gryphon.binding.challenge.created", target="chronos",
             actor="operator", message="One-time Gryphon link challenge created",
         )
+        return result
+
+    @app.delete("/api/gryphon/link-challenge")
+    async def cancel_gryphon_challenge(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        return await request.app.state.gryphon_client.cancel_link_challenge()
+
+    @app.delete("/api/gryphon/binding")
+    async def revoke_gryphon_binding(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        result = await request.app.state.gryphon_client.revoke_binding()
+        status = await request.app.state.gryphon_client.status()
+        if status.get("binding") is not None:
+            raise HTTPException(status_code=409, detail="Telegram binding revocation is not yet confirmed")
+        await request.app.state.store.audit(status="success", action="gryphon.binding.revoked", target="chronos", actor="operator", message="Telegram identity revoked for this service")
         return result
 
     @app.post("/api/gryphon/update/check")
@@ -1232,9 +1299,12 @@ def create_app() -> FastAPI:
         request: Request,
         limit: int = 200,
         after_id: int | None = None,
+        before_id: int | None = None,
         _: dict[str, Any] = Depends(operator),
     ):
-        events = await request.app.state.store.audit_events(min(limit, 1000), after_id=after_id)
+        if before_id is not None and (before_id < 1 or after_id is not None):
+            raise HTTPException(status_code=400, detail="Invalid or ambiguous log cursor")
+        events = await request.app.state.store.audit_events(min(limit, 1000), after_id=after_id, before_id=before_id)
         return {"events": events, "cursor": max((event["id"] for event in events), default=after_id or 0)}
 
     @app.get("/api/logs/download")
@@ -1337,7 +1407,7 @@ def create_app() -> FastAPI:
         return result
 
     async def update_backup(request: Request):
-        backup = await request.app.state.store.logical_backup()
+        backup = await current_backup(request)
         archive = _backup_zip(backup, request.app.state.runtime.config.version)
         return archive, f"chronos-backup-{datetime.now(timezone.utc):%Y%m%d%H%M%S}.zip"
 
