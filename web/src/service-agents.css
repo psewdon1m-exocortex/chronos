@@ -1,80 +1,48 @@
-.exo-backup-policy { display: grid; gap: 20px; min-width: 0; }
-.exo-backup-policy p { margin: 0; overflow-wrap: anywhere; }
-.exo-backup-policy .exo-agent-group { display: grid; gap: 20px; margin-top: 20px; }
-.exo-agent-group > h3 { font-size: 20px; line-height: 24px; margin: 0; }
-.exo-policy-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 20px 28px; }
-.exo-policy-toggle { display: inline-flex; align-items: center; gap: 12px; min-height: 40px; cursor: pointer; }
-.exo-policy-toggle input { appearance: auto; width: 20px; height: 20px; min-height: 20px; accent-color: var(--accent,#00a8ff); margin: 0; }
-.exo-policy-interval { display: grid; gap: 8px; }
-.exo-policy-interval input { box-sizing: border-box; width: 80px; height: 40px; min-height: 40px; padding: 0 8px; text-align: center; font: inherit; }
-.exo-backup-policy button { box-sizing: border-box; min-height: 40px; padding: 8px 18px; font: inherit; }
-.exo-backup-policy .exo-policy-controls > button { width: 342px; max-width: 100%; }
-.exo-agent-error { color: var(--danger,#f83d3d); font-size: 14px; line-height: 22px; }
-.exo-agent-muted { color: var(--white-80,#ccc); }
-.exo-agent-success { color: var(--success,#62ff8c); }
-.exo-agent-job { overflow-wrap: anywhere; }
-dialog.exo-update.exo-initialize { width: min(620px,calc(100vw - 16px)); min-height: 268px; height: fit-content; max-height: calc(100dvh - 16px); }
-.exo-initialize .exo-update-content { padding: 24px; }
-.exo-initialize form { display: grid; gap: 20px; }
-.exo-initialize label { display: grid; gap: 8px; font-weight: 700; }
-.exo-initialize input { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 12px; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; }
-.exo-initialize .actions { justify-content: flex-end; gap: 12px; margin-top: 24px; }
-.exo-initialize .actions button { min-height: 40px; padding-inline: 18px; }
-.exo-initialize .job { margin-top: 24px; padding: 18px; }
-.exo-initialize progress { height: 6px; width: 100%; margin-block: 12px; }
-.exo-initialize .exo-agent-result { margin-block: 12px; }
-@media (max-width:600px) {
-  .exo-initialize .exo-update-content { padding: 16px; }
-}
-@media (max-width:420px) {
-  .exo-policy-controls { align-items: stretch; flex-direction: column; }
-  .exo-policy-controls > button,.exo-initialize .actions > button { width: 100%; }
-  .exo-initialize .actions { flex-direction: column; }
-}
-@media (pointer:coarse) {
-  .exo-policy-toggle,.exo-backup-policy button,.exo-initialize button,.exo-initialize input { min-height: 44px; }
-}
-
-/* Initialize follows the shared overlay geometry, independent of page heading fonts. */
-dialog.exo-initialize:not(.laboratory) > header h2 { font: 700 24px/29px Consolas,"Liberation Mono",monospace; color: #fff; }
-.exo-wyvern-connection { display: grid; gap: 44px; min-width: 0; }
-.exo-wyvern-connection .exo-agent-group { display: grid; gap: 14px; min-width: 0; }
-.exo-wyvern-connection .exo-agent-group h3 { margin: 0; font-size: 20px; line-height: 24px; }
-.exo-wyvern-connection p { margin: 0; overflow-wrap: anywhere; }
-.exo-wyvern-connection label { display: grid; gap: 8px; min-width: 0; }
-.exo-wyvern-connection select { max-width: 100%; min-width: 0; min-height: 40px; font: inherit; }
-.exo-wyvern-connection button { width: 326px; max-width: 100%; min-height: 40px; padding: 8px 18px; font: inherit; }
-.exo-wyvern-connection .exo-agent-error:empty { display: none; }
-
-/* Controls are explicitly painted; native defaults differ across browsers. */
-:root .exo-backup-policy .exo-agent-group { padding: 0; border: 0; margin: 20px 0 0; }
-:root .exo-backup-policy .exo-agent-error:empty { display: none; }
-:root .exo-backup-policy .exo-policy-controls { display: grid; grid-template-columns: 250px minmax(0,342px); align-items: center; gap: 12px 28px; }
-:root .exo-policy-toggle { grid-column: 1; }
-:root .exo-policy-interval { grid-column: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-:root .exo-backup-policy .exo-policy-controls > button { grid-column: 2; grid-row: 1 / 3; align-self: stretch; min-height: 68px; }
-:root .exo-backup-policy button, :root .exo-wyvern-connection button, :root .exo-policy-interval input { color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 0; }
-:root .exo-policy-interval input { width: 80px; min-width: 80px; height: 40px; margin: 0; }
-:root .exo-policy-toggle input { appearance: none; background: transparent; border: 1px solid currentColor; border-radius: 0; flex: 0 0 20px; }
-:root .exo-policy-toggle input:checked { background: currentColor; box-shadow: inset 0 0 0 4px var(--exo-check-inset,#000); }
-:root .exo-backup-policy button:disabled, :root .exo-wyvern-connection button:disabled { opacity: .45; cursor: not-allowed; }
-:root .exo-backup-policy button:not(:disabled):hover, :root .exo-wyvern-connection button:not(:disabled):hover { border-color: var(--accent,#00a8ff); }
-:root .exo-backup-policy :is(button,input):focus-visible, :root .exo-wyvern-connection :is(button,input,select):focus-visible { outline: 2px solid var(--accent,#00a8ff); outline-offset: 3px; }
-@media (max-width:700px) {
- :root .exo-backup-policy .exo-policy-controls { grid-template-columns: minmax(0,1fr); }
- :root .exo-backup-policy .exo-policy-controls > button { grid-column: 1; grid-row: auto; }
-}
-
-:root .exo-policy-toggle input { box-sizing: border-box; padding: 0; min-width: 20px; max-width: 20px; }
-:root .exo-backup-policy .exo-agent-group > h3 { margin: 0; }
-:root .exo-backup-policy { margin-top: 20px; }
-:root .exo-agent-status { min-height: 40px; box-sizing: border-box; border: 1px solid currentColor; padding: 8px 16px; display: flex; gap: 18px; align-items: center; justify-content: space-between; }
-:root .exo-agent-status strong { display: flex; align-items: center; gap: 12px; font: inherit; }
-:root .exo-agent-status i { width: 18px; height: 18px; flex: 0 0 18px; background: currentColor; }
-:root .exo-agent-status[data-state=ready] strong { color: var(--success,#62ff8c); }
-:root .exo-agent-status[data-state=unavailable] strong { color: var(--danger,#f83d3d); }
-@media (max-width:420px) { :root .exo-agent-status { align-items: flex-start; flex-direction: column; } }
-
-:root :is(.exo-backup-policy,.exo-wyvern-connection) button { font-weight: 400; transition: background 160ms,border-color 160ms,transform 160ms; }
-:root :is(.exo-backup-policy,.exo-wyvern-connection) button:enabled:active { transform: scale(.985); transition-duration: 60ms; }
-@media (prefers-reduced-motion: reduce) { :root :is(.exo-backup-policy,.exo-wyvern-connection) button { transition: none; } :root :is(.exo-backup-policy,.exo-wyvern-connection) button:enabled:active { transform: none; } }
+/* Shared Settings controls; Laboratory supplies semantic theme variables. */
+:root :is(.exo-backup-policy,.exo-wyvern-connection) { min-width:0; display:grid; grid-template-columns:minmax(0,1fr); gap:12px; font:14px/22px Consolas,"Liberation Mono",monospace; }
+:root .exo-backup-policy { margin-top:20px; }
+:root :is(.exo-backup-policy,.exo-wyvern-connection) p { margin:0; line-height:22px; overflow-wrap:anywhere; }
+:root .exo-backup-policy .exo-agent-group { display:grid; gap:12px; padding:0; border:0; margin:0; }
+:root .exo-backup-policy .exo-agent-group + .exo-agent-group { margin-top:28px; }
+:root .exo-backup-policy .exo-policy-observations { display:grid; gap:4px; color:var(--exo-secondary,#ccc); }
+:root .exo-backup-policy button { width:326px; max-width:100%; justify-self:start; }
+:root .exo-wyvern-connection { gap:44px; }
+:root .exo-wyvern-connection .exo-agent-group { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; min-width:0; }
+:root .exo-agent-group > h3 { font:700 20px/24px Consolas,"Liberation Mono",monospace; margin:0; }
+:root .exo-policy-controls { display:grid; grid-template-columns:250px minmax(0,342px); align-items:center; gap:12px 28px; }
+:root .exo-policy-toggle { grid-column:1; display:inline-flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; }
+:root .exo-policy-toggle input { appearance:none; box-sizing:border-box; width:20px; min-width:20px; max-width:20px; height:20px; min-height:20px; padding:0; margin:0; border:1px solid var(--exo-inner,#ccc); border-radius:0; background:transparent; flex:0 0 20px; }
+:root .exo-policy-toggle input:checked { background:var(--accent,#00a8ff); box-shadow:inset 0 0 0 4px var(--exo-check-inset,#000); }
+:root .exo-policy-interval { grid-column:1; display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+:root .exo-policy-interval input { box-sizing:border-box; width:80px; min-width:80px; height:40px; min-height:40px; padding:0 8px; margin:0; text-align:center; font:inherit; color:inherit; background:transparent; border:1px solid var(--exo-inner,#ccc); border-radius:0; }
+:root .exo-backup-policy .exo-policy-controls > button { grid-column:2; grid-row:1 / 3; align-self:stretch; min-height:68px; width:342px; max-width:100%; }
+:root :is(.exo-backup-policy,.exo-wyvern-connection) button { box-sizing:border-box; min-height:40px; padding:8px 18px; color:inherit; background:transparent; border:1px solid var(--exo-inner,#ccc); border-radius:0; font:inherit; font-weight:400; transition:background 160ms,border-color 160ms,color 160ms,transform 160ms; cursor:pointer; }
+:root .exo-wyvern-connection button { width:326px; max-width:100%; }
+:root .exo-wyvern-connection label { display:grid; gap:8px; min-width:0; }
+:root .exo-wyvern-connection select { max-width:100%; min-width:0; min-height:40px; font:inherit; }
+:root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-service-logs) :is(button,a[download]):is(:hover,:focus-visible):not(:disabled) { background:var(--exo-hover,#111); border-color:var(--accent,#00a8ff); color:var(--accent,#00a8ff); transform:scale(var(--exo-scale-x,1),var(--exo-scale-y,1)); }
+:root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-service-logs) :is(button,input,select,a):focus-visible { outline:1px solid var(--accent,#00a8ff); outline-offset:3px; }
+:root :is(.exo-backup-policy,.exo-wyvern-connection) button:enabled:active { transform:scale(.985); transition-duration:60ms; }
+:root :is(.exo-backup-policy,.exo-wyvern-connection) button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+:root .exo-agent-error { color:var(--danger,#f83d3d); font-size:14px; line-height:22px; }
+:root .exo-agent-error:empty { display:none; }
+:root .exo-agent-muted { color:var(--exo-secondary,#ccc); }
+:root .exo-agent-success { color:var(--success,#62ff8c); }
+:root .exo-agent-job { overflow-wrap:anywhere; }
+:root .exo-agent-status { min-height:40px; box-sizing:border-box; border:1px solid var(--exo-inner,#ccc); padding:8px 16px; display:flex; gap:12px; align-items:center; justify-content:space-between; }
+:root .exo-agent-status strong { display:flex; align-items:center; gap:12px; font:inherit; }
+:root .exo-agent-status i { width:18px; height:18px; flex:0 0 18px; background:currentColor; }
+:root .exo-agent-status[data-state=ready] strong { color:var(--success,#62ff8c); }
+:root .exo-agent-status[data-state=unavailable] strong { color:var(--danger,#f83d3d); }
+:root dialog.exo-initialize form { display:grid; gap:20px; }
+:root dialog.exo-initialize label { display:grid; gap:8px; font-weight:700; }
+:root dialog.exo-initialize input:not([type=checkbox]) { width:100%; min-height:40px; padding:8px 12px; font:inherit; color:inherit; background:transparent; border:1px solid var(--exo-inner,#ccc); }
+:root dialog.exo-initialize .actions { margin-top:24px; }
+:root dialog.exo-initialize .actions button[type=submit] { min-width:112px; }
+:root dialog.exo-initialize .job { margin-top:24px; }
+:root dialog.exo-initialize .exo-agent-result { margin-block:12px; }
+:root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-update) [hidden] { display:none; }
+@media(max-width:700px) { :root .exo-policy-controls { grid-template-columns:minmax(0,1fr); } :root .exo-backup-policy .exo-policy-controls > button { grid-column:1; grid-row:auto; } }
+@media(max-width:420px) { :root .exo-agent-status { align-items:flex-start; flex-direction:column; } }
+@media(pointer:coarse) { :root .exo-policy-toggle,:root .exo-policy-interval input,:root :is(.exo-backup-policy,.exo-wyvern-connection) button { min-height:44px; } }
+@media(prefers-reduced-motion:reduce) { :root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-service-logs) :is(button,a[download]) { transition:none; } :root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-service-logs) :is(button,a[download]):is(:hover,:focus-visible,:active) { transform:none; } }

@@ -1,3 +1,4 @@
+import { bindDialogInteraction, bindActionGeometry } from "./ui-interactions.js";
 // Exocortex update UI protocol 2. Keep the vendored copies identical across heads.
 const terminal = new Set(["COMPLETED", "FAILED", "ROLLED_BACK", "ROLLBACK_FAILED"]);
 
@@ -22,8 +23,8 @@ function modal(title, theme, warning = false) {
   dialog.setAttribute("aria-labelledby", heading.id);
   const header = element("header"); const close = button("×", () => dialog.close(), "close"); close.setAttribute("aria-label", "Close updates");
   header.append(heading, close); const content = element("div", undefined, "exo-update-content"); dialog.append(header, content);
-  document.body.append(dialog); dialog.showModal(); close.focus();
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) { const box = dialog.getBoundingClientRect(); if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close(); } });
+  document.body.append(dialog); dialog.showModal(); bindDialogInteraction(dialog); const stopGeometry = bindActionGeometry(dialog); dialog.addEventListener("close", stopGeometry, { once: true }); close.focus();
+  dialog.addEventListener("click", (event) => { if (!warning && event.target === dialog) { const box = dialog.getBoundingClientRect(); if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close(); } });
   return { dialog, content, close };
 }
 export function updateCookieHeaders(names, header) {
@@ -57,7 +58,7 @@ export function openUpdateOverlay(options) {
   function render() {
     if (closed) return;
     const c = view.content; c.replaceChildren();
-    c.append(meta([["Installed", discovery?.installed_version ?? options.installedVersion ?? "Checking…"], ["Updater", discovery ? (discovery.updater_label ?? `Available ${discovery.updater_version}`) : "Checking…"], ["Registry", discovery ? "Checked" : error ? "Unavailable" : "Checking…"]]));
+    c.append(meta([["Installed", discovery?.installed_version ?? options.installedVersion ?? "Checking…"], ["Updater", discovery ? (discovery.updater_label ?? `Available${discovery.updater_version ? " " + discovery.updater_version : " · version unavailable"}`) : "Checking…"], ["Registry", discovery ? "Checked" : error ? "Unavailable" : "Checking…"]]));
     const box = element("section", undefined, "box"); box.append(element("h3", "Discovery"));
     const summary = checking ? "Checking for updates…" : discovery?.update_available ? `${label} ${discovery.available_version} is available.` : discovery ? "No new updates are available." : "Release discovery is unavailable.";
     box.append(element("p", summary));
@@ -73,7 +74,7 @@ export function openUpdateOverlay(options) {
     const fault = element("p", error, "error"); fault.setAttribute("role", "alert"); c.append(fault);
     if (job || installing || connection) {
       const status = element("section", undefined, "box job"); status.setAttribute("aria-live", "polite");
-      status.append(meta([["State", job?.state ?? "REQUESTED"], ["Job", job?.id ?? "Waiting for acknowledgement"], ["Message", job?.message ?? "Submitting the selected release"]]));
+      status.append(meta([["Job", job?.id ?? "Waiting for acknowledgement"], ["State", job?.state ?? "REQUESTED"]]), element("p", job?.message ?? "Submitting the selected release", "job-message"));
       const progress = element("progress"); progress.max = 1; progress.setAttribute("aria-label", "Update progress");
       const measurement = job?.progress;
       const measured = measurement?.mode === "determinate" && Number.isFinite(measurement.completed)

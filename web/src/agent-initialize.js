@@ -1,3 +1,4 @@
+import { bindDialogInteraction, bindActionGeometry } from "./ui-interactions.js";
 // A read-only open/preflight precedes the explicit typed initialization action.
 function node(tag, text, className) {
   const item = document.createElement(tag);
@@ -22,7 +23,7 @@ export function openAgentInitialization(options) {
   let code;
   if (options.codeLabel) {
     const label = node("label"); code = node("input");
-    code.type = "password"; code.autocomplete = "off"; code.spellcheck = false;
+    code.type = "password"; code.autocomplete = "off"; code.spellcheck = false; code.setAttribute("autocapitalize", "none");
     code.minLength = 32; code.maxLength = 32; code.required = true;
     code.setAttribute("aria-label", options.codeLabel);
     label.append(node("span", options.codeLabel), code);
@@ -38,12 +39,13 @@ export function openAgentInitialization(options) {
     try { if (value) localStorage.setItem(key, JSON.stringify(value)); else localStorage.removeItem(key); } catch { /* No secrets in this hint. */ }
   }
   function showJob() {
+    observationActions.hidden = false;
     panel?.remove(); panel = node("section", undefined, "box job"); panel.setAttribute("aria-live", "polite");
     const state = verifying ? "VERIFYING_CONNECTION" : verified ? "VERIFIED" : job?.state || "REQUESTED";
-    for (const [label, value] of [["Job", job?.id || job?.job_id || hint?.id || "Awaiting acknowledgement"],
-      ["State", state], ["Message", job?.message || job?.error || "The accepted operation continues on the host"]]) {
-      const row = node("p"); row.append(node("strong", label + ": "), node("span", value)); panel.append(row);
-    }
+    const metadata = node("dl", undefined, "meta");
+    for (const [label, value] of [["Job", job?.id || job?.job_id || hint?.id || "Awaiting acknowledgement"], ["State", state]])
+      metadata.append(node("dt", label), node("dd", value));
+    panel.append(metadata, node("p", job?.message || job?.error || "The accepted operation continues on the host", "job-message"));
     const progress = node("progress"); progress.max = 1; progress.setAttribute("aria-label", "Initialization progress");
     const measured = job?.progress;
     if (verified) progress.value = 1;
@@ -52,7 +54,7 @@ export function openAgentInitialization(options) {
       progress.value = measured.completed / measured.total;
     panel.append(progress);
     if (!verified) panel.append(node("p", "Closing this window stops observation only. Reopen Initialize to continue viewing this job.", "muted"));
-    content.append(panel);
+    content.insertBefore(panel, observationActions);
   }
   async function verify() {
     if (closed || verifying) return;
@@ -105,7 +107,7 @@ export function openAgentInitialization(options) {
     event.preventDefault();
     if (submitting || verifying || job && !terminal.has(job.state)) return;
     if (code && !/^[A-Za-z0-9_-]{32}$/.test(code.value.trim())) {
-      error.textContent = "Enter the 32-character setup code."; return;
+      error.textContent = "Enter the 32-character setup code."; code.setAttribute("aria-invalid", "true"); code.focus(); return;
     }
     submitting = true; submit.disabled = true; error.textContent = ""; verified = false;
     const requestID = job && terminal.has(job.state) ? crypto.randomUUID() : hint?.request_id || crypto.randomUUID(); remember({ request_id: requestID });
@@ -134,12 +136,14 @@ export function openAgentInitialization(options) {
     else if (job) void observe();
     else void recover().catch(failure => { if (!closed) error.textContent = failure.message; });
   };
-  content.append(retryStatus);
+  const observationActions = node("div", undefined, "actions");
+  const finish = node("button", "Close"); finish.type = "button"; finish.onclick = () => dialog.close();
+  observationActions.append(retryStatus, finish); observationActions.hidden = true; content.append(observationActions);
   dialog.addEventListener("close", () => {
     closed = true; clearTimeout(timer); if (code) code.value = "";
     dialog.remove(); if (focusBefore?.isConnected) focusBefore.focus();
   });
-  document.body.append(dialog); dialog.showModal(); close.focus();
+  document.body.append(dialog); dialog.showModal(); bindDialogInteraction(dialog); const stopGeometry = bindActionGeometry(dialog); dialog.addEventListener("close", stopGeometry, { once: true }); close.focus();
   void (async () => {
     try {
       if (await recover()) return;
@@ -160,7 +164,7 @@ export function confirmAgentAction({ title, message, confirmLabel, theme = "" })
     const dialog = node("dialog", undefined, "exo-update exo-initialize " + theme);
     const header = node("header"), heading = node("h2", title);
     heading.id = "confirm-" + crypto.randomUUID(); dialog.setAttribute("aria-labelledby", heading.id);
-    header.append(heading);
+    const close = node("button", "×", "close"); close.type = "button"; close.setAttribute("aria-label", "Close confirmation"); close.onclick = () => dialog.close(); header.append(heading, close);
     const body = node("div", undefined, "exo-update-content"), actions = node("div", undefined, "actions");
     const cancel = node("button", "Cancel"), accept = node("button", confirmLabel, "danger");
     cancel.type = accept.type = "button"; cancel.onclick = () => dialog.close();
@@ -170,6 +174,6 @@ export function confirmAgentAction({ title, message, confirmLabel, theme = "" })
       const confirmed = dialog.returnValue === "confirmed"; dialog.remove();
       if (previous?.isConnected) previous.focus(); resolve(confirmed);
     }, { once: true });
-    document.body.append(dialog); dialog.showModal(); cancel.focus();
+    document.body.append(dialog); dialog.showModal(); bindDialogInteraction(dialog); const stopGeometry = bindActionGeometry(dialog); dialog.addEventListener("close", stopGeometry, { once: true }); cancel.focus();
   });
 }

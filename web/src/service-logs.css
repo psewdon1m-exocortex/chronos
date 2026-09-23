@@ -1,15 +1,31 @@
-.exo-service-logs { display: grid; gap: 20px; font: 14px/22px Consolas,"Courier New",monospace; min-width: 0; }
-.exo-log-actions { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
-.exo-log-actions a,.exo-service-logs button { box-sizing: border-box; display: inline-flex; justify-content: center; align-items: center; color: inherit; background: transparent; border: 1px solid currentColor; text-decoration: none; min-height: 40px; padding: 8px 18px; font: inherit; cursor: pointer; }
-.exo-log-actions a { width: 326px; max-width: 100%; }
-.exo-service-logs button:disabled { opacity: .5; cursor: default; }
-.exo-service-logs > p { margin: 0; }
-.exo-log-viewport { height: 460px; overflow: auto; border: 1px solid var(--white-80,#ccc); scrollbar-gutter: stable; }
-.exo-log-row { display: grid; grid-template-columns: 68px minmax(180px,1fr) 166px; gap: 12px; padding: 7px 12px; min-width: 462px; min-height: 36px; box-sizing: border-box; align-items: start; }
-.exo-log-row + .exo-log-row { border-top: 1px solid color-mix(in srgb,currentColor 20%,transparent); }
-.exo-log-row > span { overflow-wrap: anywhere; white-space: pre-wrap; }
-.exo-log-row time { text-align: right; white-space: nowrap; font: inherit; font-variant-numeric: tabular-nums; }
-.exo-log-header { position: sticky; top: 0; z-index: 1; color: var(--accent,#00a8ff); background: var(--log-background,#000); font-weight: bold; height: 36px; }
-.exo-log-header > :last-child { text-align: right; }
-.exo-log-viewport > p { padding: 20px; }
-@media (pointer:coarse) { .exo-service-logs button,.exo-log-actions a { min-height: 44px; } }
+/* Part 01 §10.5.2: stable, responsive log history. */
+.exo-service-logs { display:grid; gap:16px; font:14px/22px Consolas,"Liberation Mono",monospace; min-width:0; }
+.exo-log-actions { display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:flex-end; }
+.exo-log-download,.exo-service-logs button { box-sizing:border-box; display:inline-flex; justify-content:center; align-items:center; color:inherit; background:transparent; border:1px solid var(--exo-inner,#ccc); text-decoration:none; min-height:40px; padding:8px 18px; font:inherit; cursor:pointer; }
+.exo-log-download { min-width:207px; width:max-content; max-width:100%; }
+.exo-log-actions > p { margin:0; flex:1 1 280px; }
+.exo-log-footer { display:flex; gap:16px; flex-wrap:wrap; }
+.exo-service-logs [hidden] { display:none; }
+.logs-command-band { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.exo-service-logs button:disabled { opacity:.45; cursor:default; }
+.exo-service-logs > p { margin:0; }
+.exo-service-logs > button { justify-self:start; }
+.exo-log-viewport { position:relative; height:460px; overflow-y:auto; overflow-x:hidden; border:1px solid var(--exo-inner,#ccc); scrollbar-gutter:stable; }
+.exo-log-row { display:grid; grid-template-columns:68px minmax(0,1fr) 166px; column-gap:12px; padding:1px 16px 2px; min-width:0; min-height:25px; box-sizing:border-box; align-items:start; }
+.exo-log-row > :is(span,strong) { min-width:0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.exo-log-row time { text-align:right; white-space:nowrap; font:inherit; font-variant-numeric:tabular-nums; }
+.exo-log-header { position:sticky; top:0; z-index:1; color:#fff; background:var(--log-background,#000); font-weight:bold; height:36px; align-items:center; border-bottom:1px solid var(--exo-inner,#ccc); }
+.exo-log-header > :last-child { text-align:right; }
+.exo-log-viewport > p { padding:16px; }
+.exo-log-success { color:var(--success,#62ff8c); }
+.exo-log-error { color:var(--danger,#f83d3d); }
+.exo-log-neutral { color:var(--exo-secondary,#ccc); }
+.exo-log-warning { color:var(--exo-warning,var(--exo-secondary,#ccc)); }
+@media(max-width:600px) {
+ .exo-log-row { grid-template-columns:68px minmax(0,1fr); padding-block:6px; gap:4px 12px; }
+ .exo-log-row time { grid-column:2; text-align:left; white-space:normal; overflow-wrap:anywhere; color:var(--exo-secondary,#ccc); }
+ .exo-log-row time::before { content:"TIME "; }
+ .exo-log-header > :last-child { display:none; }
+ .exo-log-actions { justify-content:flex-start; }
+}
+@media(pointer:coarse) { .exo-service-logs button,.exo-log-actions a { min-height:44px; } }
