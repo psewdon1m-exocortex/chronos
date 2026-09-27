@@ -15,7 +15,6 @@ from app.gryphon import (
     GryphonError,
     format_duration,
 )
-from app.updater import UpdaterClient
 
 
 class FakeStore:
@@ -273,40 +272,3 @@ def test_command_catalog_comparison_ignores_gryphon_sort_order():
     assert GryphonClient._command_catalog_is_current({
         "commands": list(reversed(CHRONOS_COMMAND_CATALOG)),
     }) is True
-
-
-@pytest.mark.asyncio
-async def test_updater_client_uses_gryphon_component_routes(monkeypatch):
-    client = UpdaterClient("/run/exocortex/updater.sock", "control-token", "chronos")
-    calls: list[tuple[str, str, dict[str, Any] | None, bool, float]] = []
-
-    def request(
-        _client: UpdaterClient,
-        method: str,
-        route: str,
-        body: dict[str, Any] | None = None,
-        authenticated: bool = False,
-        timeout: float = 10,
-    ):
-        calls.append((method, route, body, authenticated, timeout))
-        return {"update_available": route.endswith("/check")}
-
-    monkeypatch.setattr(UpdaterClient, "_request", request)
-    assert (await client.check_gryphon("1.2.3"))["update_available"] is True
-    await client.update_gryphon("1.2.4")
-    assert calls == [
-        (
-            "POST",
-            "/v1/components/gryphon-linux/check",
-            {"head_id": "chronos", "current_version": "1.2.3"},
-            True,
-            30,
-        ),
-        (
-            "POST",
-            "/v1/components/gryphon-linux/update",
-            {"head_id": "chronos", "version": "1.2.4"},
-            True,
-            300,
-        ),
-    ]

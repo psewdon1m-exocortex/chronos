@@ -139,7 +139,7 @@ class UpdaterClient:
             {"head_id": self.head_id, "current_version": current_version}, True, 30)
 
     async def lifecycle(self, kind: str, **fields: str) -> dict[str, Any]:
-        if kind not in {"gryphon-initialization", "updater-self-update"}:
+        if kind != "updater-self-update":
             raise UpdaterError("Unsupported lifecycle operation", 400)
         return await asyncio.to_thread(self._request, "POST", f"/v1/lifecycle/{kind}",
             {"head_id": self.head_id, **fields}, True, 30)
@@ -156,26 +156,6 @@ class UpdaterClient:
                 "export_url": export_url,
                 "enrollment_code": enrollment_code,
             },
-            True,
-            30,
-        )
-
-    async def update_gryphon(self, version: str) -> dict[str, Any]:
-        return await asyncio.to_thread(
-            self._request,
-            "POST",
-            "/v1/components/gryphon-linux/update",
-            {"head_id": self.head_id, "version": version},
-            True,
-            300,
-        )
-
-    async def check_gryphon(self, current_version: str) -> dict[str, Any]:
-        return await asyncio.to_thread(
-            self._request,
-            "POST",
-            "/v1/components/gryphon-linux/check",
-            {"head_id": self.head_id, "current_version": current_version},
             True,
             30,
         )

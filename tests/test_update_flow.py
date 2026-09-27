@@ -79,9 +79,10 @@ def test_single_standard_zip_saved_copy_gate_and_component_jobs():
         assert route == "/v2/updates"
         assert payload["version"] == "0.1.4"
         assert base64.b64decode(payload["backup"]["data_base64"]) == archive
-        assert client.post("/api/update-flow/install/gryphon", json={"version": "0.1.4", "request_id": "01234567-0123-4123-8123-012345678901"}).status_code == 200
+        assert client.post("/api/update-flow/check", json={"component": "gryphon"}).status_code == 400
+        assert client.post("/api/update-flow/install/gryphon", json={"version": "0.1.4", "request_id": "01234567-0123-4123-8123-012345678901"}).status_code == 400
         assert len(created) == 1
-        assert submitted[-1][0] == "/v2/components/gryphon/updates"
+        assert len(submitted) == 1
         try:
             saved_backup(archive, receipt + "x", "chronos", Updater.control_token)
         except HTTPException as error:

@@ -459,23 +459,28 @@ pre {
 .settings-backup-card .backup-version-group > p { margin-bottom: 6px; }
 .settings-bot-card { min-height: 0; }
 .settings-bot-card .bot-connection-groups { padding-top: 24px; }
-.bot-connection-groups { gap: 50px; }
 .bot-connection-groups .settings-group { gap: 8px; }
 .bot-connection-groups .settings-group h3 { line-height: 1.25; }
 .bot-connection-groups .settings-group + .settings-group { border-top: 0; padding-top: 0; }
-.bot-connection-status { margin-top: 16px; }
-.bot-connection-action { margin-top: 24px; }
-.bot-connection-selected { margin-top: 4px !important; color: var(--text-secondary) !important; }
-.bot-connection-selected strong { color: var(--white); }
-.bot-picker { display: grid; gap: 20px; }
-.bot-picker-list { display: grid; border: 1px solid var(--line-inner); }
-.bot-picker-list > label { min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line-inner); cursor: pointer; }
-.bot-picker-list > label:last-child { border-bottom: 0; }
-.bot-picker-list > label.is-disabled { opacity: .5; cursor: not-allowed; }
-.bot-picker-list input { width: 18px; height: 18px; min-height: 18px; accent-color: var(--accent); }
-.bot-picker-list label > span { display: grid; gap: 3px; }
-.bot-picker-list small { color: var(--text-secondary); }
-.bot-picker-list > p { margin: 0; padding: 16px; color: var(--text-secondary); }
+.bot-connection-status { display: grid; gap: 10px; margin-top: 20px; }
+.bot-connection-status .service-status-row > span:nth-child(2) { justify-self: end; }
+.bot-connection-selected { margin-top: 24px !important; color: var(--text-secondary) !important; }
+.bot-connection-selected strong { color: var(--white); font-weight: 400; }
+.bot-connection-action { margin-top: -2px; }
+.overlay-dialog.gryphon-choice-overlay { width: min(760px, calc(100vw - 16px)); }
+.gryphon-choice-overlay .overlay-content { min-height: 645px; display: flex; flex-direction: column; padding: 24px 20px 20px; }
+.gryphon-choice-intro { margin: 0 0 20px; color: var(--text-secondary); }
+.gryphon-choice-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; flex: 1; min-height: 0; }
+.gryphon-choice-list { display: grid; align-content: start; gap: 22px; }
+.gryphon-choice-list > p { color: var(--text-secondary); }
+.gryphon-choice { min-height: 52px; display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 15px; text-align: left; color: var(--text-secondary); border: 1px solid var(--line-inner); background: var(--black); }
+.gryphon-choice.is-selected { border-color: var(--accent); color: var(--accent); }
+.gryphon-choice-check { width: 20px; height: 20px; flex: 0 0 20px; border: 1px solid var(--line-inner); }
+.gryphon-choice.is-selected .gryphon-choice-check { border: 4px double var(--white); background: var(--white); box-shadow: inset 0 0 0 4px var(--black); }
+.gryphon-adapter-config { display: grid; align-content: start; gap: 10px; min-height: 460px; padding: 14px 16px; border: 1px solid var(--line-inner); overflow-wrap: anywhere; }
+.gryphon-adapter-config strong { margin-bottom: 20px; }
+.gryphon-unlink-action { width: 100%; margin-top: 16px; color: var(--danger); border-color: var(--danger); }
+@media (max-width: 620px) { .gryphon-choice-layout { grid-template-columns: 1fr; } .gryphon-adapter-config { min-height: 180px; } .gryphon-choice-overlay .overlay-content { min-height: 0; } }
 .one-time-code { border: 1px solid var(--accent); padding: 14px; overflow-wrap: anywhere; }
 .one-time-code strong { color: var(--accent); font-size: 18px; }
 .kernel-connection-controls { display: grid; grid-template-columns: minmax(220px, 326px) minmax(0, 1fr); gap: 20px; }
@@ -679,4 +684,42 @@ pre {
 @media(max-width:420px) {
   .settings-stack :is(.settings-groups,.settings-form-grid),
   .settings-stack .universal-card-body:has(> .exo-service-logs) { padding-left:16px; padding-right:16px; }
+}
+
+/* Appearance follows the 401px Settings reference card at desktop width. */
+.settings-appearance-card .settings-groups { display:block; padding:24px 32px 40px 38px; }
+.settings-security-card .settings-groups { display:block; padding:24px 38px 43px 38px; }
+.settings-security-card .settings-group { display:grid; gap:0; border:0; padding:0; }
+.settings-security-card .settings-group + .settings-group { margin-top:46px; border:0; padding:0; }
+.settings-security-card .settings-group > h3 { margin:0 0 8px; line-height:24px; }
+.settings-security-card .settings-group > p { margin:0; line-height:22px; }
+.settings-security-card .settings-group > p + .wide-command { margin-top:20px; }
+.settings-security-card .settings-group:first-child .wide-command { width:326px; max-width:100%; }
+.settings-security-card .kernel-connection-controls { gap:22px; margin-top:6px; }
+.settings-security-card .kernel-connection-controls + .wide-command { margin-top:17px; }
+.security-access-overlay .overlay-content { padding:24px 24px 39px; }
+.security-access-overlay .form-grid { gap:20px; }
+.security-access-overlay .form-grid label { gap:8px; }
+.security-access-overlay .form-grid input { height:40px; }
+.security-access-overlay .form-grid .form-hint { margin:0; }
+.security-access-overlay .form-actions { padding:0; }
+.security-access-overlay .form-actions button { min-width:169px; }
+.settings-appearance-card .settings-group { display:grid; gap:0; border:0; padding:0; }
+.settings-appearance-card .settings-group + .settings-group { margin-top:64px; border:0; padding:0; }
+:root .settings-appearance-card .settings-group > h3 { margin:0 0 8px; line-height:24px; }
+.settings-appearance-card .settings-group > p { line-height:22px; }
+.settings-appearance-card .accent-row { grid-template-columns:40px 326px 123px 123px; gap:20px; margin:20px 0 0 3px; }
+.settings-appearance-card .accent-row > :is(input,button) { width:100%; height:40px; min-height:40px; }
+.settings-appearance-card .toggle-control { min-height:40px; gap:12px; margin:8px 0 0 3px; }
+.settings-appearance-card .toggle-control input { appearance:none; flex:0 0 20px; width:20px; min-width:20px; height:20px; min-height:20px; margin:0; padding:0; border:1px solid var(--line-inner); border-radius:0; background:#000; }
+.settings-appearance-card .toggle-control input:checked::after { display:block; width:10px; height:10px; margin:4px; background:#fff; content:""; }
+@media(max-width:1050px) {
+  .settings-appearance-card .accent-row { grid-template-columns:40px minmax(0,1fr); gap:12px; }
+  .settings-appearance-card .accent-row button { grid-column:1 / -1; }
+}
+@media(max-width:720px) {
+  .settings-appearance-card .settings-groups { padding:24px 20px 30px; }
+  .settings-appearance-card .settings-group + .settings-group { margin-top:44px; }
+  .settings-security-card .settings-groups { padding:24px 20px 30px; }
+  .settings-security-card .settings-group + .settings-group { margin-top:44px; }
 }

@@ -141,9 +141,9 @@ export const DOCUMENTATION_ARTICLES: DocumentationArticle[] = [
         <p>Gryphon owns Telegram transport, bot credentials and user identity. Chronos consumes the verified function connection; it does not store a plaintext bot token.</p>
         <h2>Connect</h2>
         <ol>
-          <li>Connect the bot on the server with <code>sudo gryphon bot connect ALIAS</code>.</li>
-          <li>Open Settings and use <strong>Link Chronos function</strong> to select the bot.</li>
-          <li>If no Telegram user is linked, use <strong>Initialize bot</strong> and send the one-time <code>/link</code> challenge.</li>
+          <li>Register the bot in <code>sudo updater tui</code> and send the shown <code>/link CODE</code> to it once in Telegram.</li>
+          <li>Open Settings → Gryphon Connection and use <strong>Link Gryphon function</strong> to select the paired bot. Gryphon grants its verified account access to Chronos.</li>
+          <li>Use <strong>Change Gryphon function</strong> to select another paired bot or unlink this service. Manage the shared Gryphon version in Updater TUI.</li>
         </ol>
         <h2>Commands</h2>
         <pre><code>{[

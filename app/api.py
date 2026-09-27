@@ -35,7 +35,7 @@ from .gryphon import (
     GryphonError,
     GryphonNotifier,
 )
-from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value, profile_missing, resolve_management
+from .kernel_register import KernelRegisterError, apply_register, load_snapshot, register_value, profile_missing
 from .backup_policy import BackupPolicy
 from .neptune import NeptuneClient, NeptuneError
 from .mastermind_reader import install_mastermind_reader
@@ -1099,10 +1099,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/gryphon/initialize", status_code=202)
     async def gryphon_initialize(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
-        request_id = body.get("request_id")
-        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-fA-F-]{36}", request_id):
-            raise HTTPException(status_code=400, detail="A stable initialization request ID is required")
-        return await request.app.state.updater.lifecycle("gryphon-initialization", request_id=request_id)
+        raise HTTPException(status_code=403, detail="Manage the shared Gryphon gateway with sudo updater tui")
 
     @app.post("/api/updates/agent/install", status_code=202)
     async def updater_self_update(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
@@ -1114,10 +1111,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/gryphon/management")
     async def gryphon_management(request: Request, _: dict[str, Any] = Depends(operator)):
-        try:
-            return {"url": await asyncio.to_thread(resolve_management, request.app.state.runtime.config, "gryphon")}
-        except KernelRegisterError:
-            raise HTTPException(503, "An authorized Gryphon management destination is not available in Kernel") from None
+        raise HTTPException(status_code=403, detail="Manage bots with sudo updater tui")
 
     @app.get("/api/gryphon/bots")
     async def gryphon_bots(request: Request, _: dict[str, Any] = Depends(operator)):
@@ -1156,12 +1150,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/gryphon/link-challenge", status_code=201)
     async def gryphon_link_challenge(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        result = await request.app.state.gryphon_client.issue_link_challenge()
-        await request.app.state.store.audit(
-            status="success", action="gryphon.binding.challenge.created", target="chronos",
-            actor="operator", message="One-time Gryphon link challenge created",
-        )
-        return result
+        raise HTTPException(status_code=403, detail="Pair the bot with sudo updater tui")
+
+    @app.put("/api/gryphon/binding")
+    async def gryphon_attach_owner(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        return await request.app.state.gryphon_client.attach_owner()
 
     @app.delete("/api/gryphon/link-challenge")
     async def cancel_gryphon_challenge(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
@@ -1178,17 +1171,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/gryphon/update/check")
     async def gryphon_update_check(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        status = await request.app.state.gryphon_client.status()
-        return await request.app.state.updater.check_gryphon(str(status["version"]))
+        raise HTTPException(status_code=403, detail="Check shared Gryphon releases with sudo updater tui")
 
     @app.post("/api/gryphon/update/install")
     async def gryphon_update_install(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
-        requested_version = str(body.get("version") or "")
-        status = await request.app.state.gryphon_client.status()
-        update = await request.app.state.updater.check_gryphon(str(status["version"]))
-        if not update["update_available"] or update["available_version"] != requested_version:
-            raise HTTPException(status_code=409, detail="Requested Gryphon version is not the current upgrade candidate")
-        return await request.app.state.updater.update_gryphon(requested_version)
+        raise HTTPException(status_code=403, detail="Update the shared Gryphon gateway with sudo updater tui")
 
     async def parse_backup_upload(file: UploadFile) -> dict[str, Any]:
         body = await file.read(64 * 1024 * 1024 + 1)

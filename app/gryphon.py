@@ -190,6 +190,9 @@ class GryphonClient:
     async def revoke_binding(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, "DELETE", "/v1/service/binding")
 
+    async def attach_owner(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self._request, "PUT", "/v1/service/binding")
+
     async def cancel_link_challenge(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, "DELETE", "/v1/service/link-challenges")
 

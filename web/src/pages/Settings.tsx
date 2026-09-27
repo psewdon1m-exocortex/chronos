@@ -48,7 +48,6 @@ interface GryphonBot {
 }
 
 interface NeptuneAvailability { installed: boolean | null; linked: boolean | null; state: "linked" | "unlinked" | "unavailable" | "authorization_failed"; version?: string | null }
-interface GryphonChallenge { code: string; expiresAt: string; command: string; botUsername?: string }
 
 const FALLBACK_ZONES = ["UTC", "Europe/Istanbul", "Europe/Moscow", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Tokyo"];
 
@@ -107,7 +106,6 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [gryphonConnectionOpen, setGryphonConnectionOpen] = useState(false);
   const [gryphonPending, setGryphonPending] = useState(false);
   const [gryphonError, setGryphonError] = useState("");
-  const [gryphonChallenge, setGryphonChallenge] = useState<GryphonChallenge | null>(null);
   const [dragged, setDragged] = useState<SettingsKey | null>(null);
   const [drop, setDrop] = useState<{ key: SettingsKey; after: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -144,13 +142,6 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     } catch (error) { setGryphonError(error instanceof Error ? error.message : "Unavailable"); }
   }, []);
   useEffect(() => { void loadGryphon(); const timer = setInterval(() => void loadGryphon(), 5000); return () => clearInterval(timer); }, [loadGryphon]);
-  useEffect(() => {
-    if (!gryphonChallenge) return;
-    if (gryphon?.binding) { setGryphonChallenge(null); return; }
-    const timer = setTimeout(() => { setGryphonChallenge(null); notify("info", "Telegram link code expired. Create a new code if needed."); },
-      Math.max(0, Date.parse(gryphonChallenge.expiresAt) - Date.now()));
-    return () => clearTimeout(timer);
-  }, [gryphonChallenge, gryphon?.binding, notify]);
   const commit = async (patch: Partial<SettingsValues>, message = "Setting saved.") => {
     if (!values) return;
     const previous = values;
@@ -275,70 +266,42 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   };
 
 
-  const openGryphonManagement = async () => {
-    try { const { url } = await api<{ url: string }>("/api/gryphon/management"); window.location.assign(url); }
-    catch (error) { notify("error", error instanceof Error ? error.message : "Management destination is unavailable"); }
-  };
-
   const openGryphonConnection = async () => {
     setGryphonPending(true);
     try {
       const result = await api<{ bots: GryphonBot[] }>("/api/gryphon/bots");
       setGryphonBots(result.bots);
-      setGryphonBotId(result.bots.find((bot) => bot.state === "ready")?.id ?? "");
+      setGryphonBotId(gryphon?.bot?.id ?? "");
       setGryphonConnectionOpen(true);
     } catch (error) { notify("error", error instanceof Error ? error.message : "Gryphon bot list could not be loaded."); }
     finally { setGryphonPending(false); }
   };
 
-  const initializeAgent = (component: "Neptune" | "Gryphon") => openAgentInitialization({
-    component, service: "chronos",
+  const initializeAgent = () => openAgentInitialization({
+    component: "Neptune", service: "chronos",
     description: "Initialize this service connection through the local Updater. Existing shared agents are reused.",
-    ...(component === "Neptune" ? { codeLabel: "One-time setup code", profile: "Required pipeline: recovery ZIP archive." } : {}),
-    initialize: input => api<InitializationJob>(component === "Neptune" ? "/api/neptune/initialize" : "/api/gryphon/initialize", { method: "POST", body: JSON.stringify(input) }),
+    codeLabel: "One-time setup code", profile: "Required pipeline: recovery ZIP archive.",
+    initialize: input => api<InitializationJob>("/api/neptune/initialize", { method: "POST", body: JSON.stringify(input) }),
     observe: id => api<InitializationJob>("/api/updates/jobs/" + encodeURIComponent(id || "")),
     recover: async hint => {
       if (hint?.id) return api<InitializationJob>("/api/updates/jobs/" + encodeURIComponent(hint.id));
       const result = await api<{ jobs: (InitializationJob & { service?: string })[] }>("/api/update-flow/jobs");
-      return result.jobs.find(job => job.service === component.toLowerCase() + "-initialization" &&
+      return result.jobs.find(job => job.service === "neptune-initialization" &&
         (hint?.request_id ? job.request_id === hint.request_id : !["COMPLETED", "FAILED"].includes(job.state)));
     },
     verify: async () => {
-      if (component === "Neptune") {
-        const availability = await api<NeptuneAvailability>("/api/neptune/availability"); setNeptune(availability);
-        return { ready: availability.state === "linked" && availability.linked === true,
-          message: "Installation is not enough: the scoped archive pipeline must report a verified connection." };
-      }
-      const status = await api<GryphonStatus>("/api/gryphon/status"); setGryphon(status); setGryphonError("");
-      return { ready: typeof status.connected === "boolean", message: "The service registration is not verified." };
+      const availability = await api<NeptuneAvailability>("/api/neptune/availability"); setNeptune(availability);
+      return { ready: availability.state === "linked" && availability.linked === true,
+        message: "Installation is not enough: the scoped archive pipeline must report a verified connection." };
     },
   });
 
-  const cancelGryphonChallenge = async () => {
-    try { await api("/api/gryphon/link-challenge", { method: "DELETE" }); setGryphonChallenge(null); }
-    catch (error) { notify("error", error instanceof Error ? error.message : "Challenge cancellation failed. The code remains valid until expiry."); }
-  };
-  const revokeGryphonBinding = async () => {
-    if (!await confirmAgentAction({ title: "Revoke Telegram binding", message: "This Telegram account will lose access to this service. The service function and shared bot remain connected. A new link code will be required.", confirmLabel: "Revoke binding" })) return;
-    setGryphonPending(true);
-    try { await api("/api/gryphon/binding", { method: "DELETE" }); setGryphonChallenge(null); await loadGryphon(); notify("success", "Telegram binding revoked."); }
-    catch (error) { notify("error", error instanceof Error ? error.message : "Revocation was not confirmed."); }
-    finally { setGryphonPending(false); }
-  };
-
-  const issueGryphonLink = async () => {
-    setGryphonPending(true);
-    try { setGryphonChallenge(await api<GryphonChallenge>("/api/gryphon/link-challenge", { method: "POST" })); }
-    catch (error) { notify("error", error instanceof Error ? error.message : "Telegram link code could not be created."); }
-    finally { setGryphonPending(false); }
-  };
-
-  const connectGryphon = async () => {
-    if (!gryphonBotId) return;
+  const connectGryphon = async (botId: string) => {
+    if (!botId || (botId === gryphon?.bot?.id && gryphon.binding)) return;
     setGryphonPending(true);
     try {
-      await api("/api/gryphon/connection", { method: "PUT", body: JSON.stringify({ botId: gryphonBotId }) });
-      setGryphonConnectionOpen(false); await loadGryphon(); notify("success", "Chronos function linked to Gryphon.");
+      await api("/api/gryphon/connection", { method: "PUT", body: JSON.stringify({ botId }) });
+      setGryphonBotId(botId); await loadGryphon(); notify("success", "Chronos function and paired Telegram account linked.");
     } catch (error) { notify("error", error instanceof Error ? error.message : "Chronos function could not be linked."); }
     finally { setGryphonPending(false); }
   };
@@ -348,7 +311,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     setGryphonPending(true);
     try {
       await api("/api/gryphon/connection", { method: "DELETE" });
-      await loadGryphon(); notify("success", "Chronos function unlinked from Gryphon.");
+      setGryphonBotId(""); await loadGryphon(); notify("success", "Chronos function unlinked from Gryphon.");
     } catch (error) { notify("error", error instanceof Error ? error.message : "Chronos function could not be unlinked."); }
     finally { setGryphonPending(false); }
   };
@@ -386,9 +349,9 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   });
 
   const sections: Record<SettingsKey, React.ReactNode> = {
-    appearance: <UniversalCard title="Appearance" {...cardProps("appearance")}>
+    appearance: <UniversalCard title="Appearance" {...cardProps("appearance", "settings-appearance-card")}>
       <div className="settings-groups">
-        <section className="settings-group"><h3>Color correction</h3><p>Valid changes preview immediately. Only Apply makes the accent authoritative.</p>
+        <section className="settings-group"><h3>Color correction</h3><p>Changes preview immediately and apply to both authenticated views and sign-in.</p>
           <div className="accent-row">
             <label className="swatch-control"><input type="color" value={/^#[0-9a-fA-F]{6}$/.test(accentDraft) ? accentDraft : values.theme_accent} onChange={(event) => { setAccentDraft(event.target.value); applyTheme(event.target.value); }} aria-label="Accent color" /></label>
             <input aria-label="Accent hex value" value={accentDraft} onChange={(event) => { const value = event.target.value; setAccentDraft(value); if (/^#[0-9a-fA-F]{6}$/.test(value)) applyTheme(value); }} />
@@ -402,16 +365,16 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         </section>
       </div>
     </UniversalCard>,
-    security: <UniversalCard title="Security" {...cardProps("security")}>
+    security: <UniversalCard title="Security" {...cardProps("security", "settings-security-card")}>
       <div className="settings-groups">
-        <section className="settings-group"><h3>Changing Access Key</h3><p>Changing the Access Key revokes every other active browser session.</p><button type="button" className="wide-command" onClick={() => setAccessOpen(true)} data-smart-hover>Change Access Key</button></section>
-        <section className="settings-group"><h3>Connection with Kernel</h3><p>Kernel identity and reachability are public status; its access token remains write-only.</p>
+        <section className="settings-group"><h3>Changing Access Key</h3><p>Changing the Access Key revokes every other active browser session.</p><button type="button" className="wide-command" onClick={() => { setAccessKeys({ current: "", next: "", repeat: "" }); setAccessOpen(true); }} data-smart-hover>Change Access Key</button></section>
+        <section className="settings-group"><h3>Connection with Kernel</h3>
           <div className="kernel-connection-controls">
             <label><span className="visually-hidden">Kernel URL</span><input type="url" aria-label="Kernel URL" placeholder="https://kernel.example.com" value={kernelUrl} disabled={kernelUrlPending || kernelTokenPending} onChange={(event) => setKernelUrl(event.target.value)} onBlur={() => void commitKernelUrl()} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
             <div className="kernel-row"><span>Kernel Core</span><span className={data.runtime.kernel_reachable ? "status-success" : "status-error"}>{data.runtime.kernel_reachable ? "Service reachable" : data.runtime.kernel_configured ? "Last check failed" : "Not configured"}</span><StatusSquare state={data.runtime.kernel_reachable ? "success" : "danger"} /></div>
           </div>
           {!data.runtime.kernel_configured && kernelUrl && <p className="form-hint">The URL will become authoritative together with the first validated token.</p>}
-          <button type="button" className="wide-command" disabled={!validKernelOrigin(kernelUrl) || kernelUrlPending} onClick={() => { setKernelTokens({ next: "", repeat: "" }); setKernelTokenOpen(true); }} data-smart-hover>Rotate secure Kernel access token</button>
+          <button type="button" className="wide-command" disabled={kernelUrlPending} onClick={() => { setKernelTokens({ next: "", repeat: "" }); setKernelTokenOpen(true); }} data-smart-hover>Rotate secure Kernel access token</button>
         </section>
       </div>
     </UniversalCard>,
@@ -421,7 +384,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         <section className="settings-group"><h3>Restore snapshot</h3><p>Validation completes before replacement begins. A pre-restore transaction protects the current timeline.</p><button type="button" className="settings-action" onClick={() => setRestoreOpen(true)} data-smart-hover>Browse local snapshot archive</button></section>
         <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Neptune exports the same ZIP as the manual action and uploads it without changing its bytes.</p>
           <div className="service-status-row"><span>Local Neptune agent:</span><span>{!neptune ? "Checking" : neptune.state === "linked" ? "Linked" : neptune.state === "unlinked" ? "Not linked" : neptune.state === "authorization_failed" ? "Authorization failed" : neptune.linked ? "Unavailable · last known linked" : "Unavailable · installation unknown"}</span><StatusSquare state={neptune?.state === "linked" ? "success" : "danger"} /></div>
-          <button type="button" className="settings-action" onClick={() => initializeAgent("Neptune")}>Initialize</button>
+          <button type="button" className="settings-action" onClick={() => initializeAgent()}>Initialize</button>
           <BackupPolicyPanel service="chronos" base="/api/neptune/policy" headers={policyHeaders} />
           </section>
       <section className="settings-group"><h3>Neptune version</h3><p>Current installed version: {neptune?.version ?? "Unavailable"}</p><button type="button" className="settings-action" onClick={() => openChronosUpdates("neptune")}>Check Neptune for updates</button>
@@ -430,20 +393,14 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     </UniversalCard>,
     gryphon: <UniversalCard title="Gryphon Connection" {...cardProps("gryphon", "settings-bot-card")}>
       <div className="settings-groups bot-connection-groups">
-        <section className="settings-group"><h3>Service connection</h3>
-          <p>Gryphon handles Telegram commands and notifications for this service.</p>
-          <div className="service-status-row"><span>Local Gryphon agent:</span><span>{gryphonError ? gryphon ? "Unavailable · last known registration retained" : "Unavailable · registration unknown" : gryphon ? "Reachable" : "Checking"}</span><StatusSquare state={gryphon && !gryphonError ? "success" : "danger"} /></div>
+        <section className="settings-group"><h3>Gryphon bot binding</h3>
+          <p>Gryphon owns the Telegram connection, service receives only service-scoped commands.</p>
+          <div className="bot-connection-status"><div className="service-status-row"><span>Local Gryphon agent:</span><span className={gryphon && !gryphonError ? "status-success" : "status-error"}>{gryphon ? "Reachability" : "Checking"}</span><StatusSquare state={gryphon && !gryphonError ? "success" : "danger"} /></div>
+            <div className="service-status-row"><span>Applied connection:</span><span className={gryphon?.connected && gryphon.binding && !gryphonError ? "status-success" : "status-error"}>Reachability</span><StatusSquare state={gryphon?.connected && gryphon.binding && !gryphonError ? "success" : "danger"} /></div></div>
           {gryphonError && <p className="inline-error" role="alert">{gryphonError}</p>}
-          <button type="button" className="settings-action" onClick={() => initializeAgent("Gryphon")}>Initialize</button>
-          <button type="button" className="settings-action" disabled={!gryphon || Boolean(gryphonError) || gryphonPending} onClick={() => void (gryphon?.connected ? disconnectGryphon() : openGryphonConnection())}>{gryphon?.connected ? "Unlink service function" : "Link service function"}</button>
-          <button type="button" className="settings-action" onClick={() => void openGryphonManagement()}>Open Gryphon management</button>
-          {gryphon?.bot && <p>Selected bot: <strong>{gryphon.bot.username ? "@" + gryphon.bot.username : gryphon.bot.alias}</strong></p>}
+          <p className="bot-connection-selected">Applied connection: <strong>{gryphon?.connected ? gryphon.bot?.alias ?? "unknown" : "none"}</strong></p>
+          <button type="button" className="settings-action bot-connection-action" disabled={!gryphon || Boolean(gryphonError) || gryphonPending} onClick={() => void openGryphonConnection()}>{gryphon?.connected ? "Change Gryphon function" : "Link Gryphon function"}</button>
         </section>
-        <section className="settings-group"><h3>Telegram account</h3>
-          <p>{gryphon?.binding ? "Telegram account linked." : "No Telegram account is linked to this service."}</p>
-          <button type="button" className="settings-action" disabled={!gryphon?.connected || Boolean(gryphonError) || gryphonPending} onClick={() => void (gryphon?.binding ? revokeGryphonBinding() : issueGryphonLink())}>{gryphon?.binding ? "Revoke Telegram binding" : "Link Telegram account"}</button>
-        </section>
-        <section className="settings-group"><h3>Gryphon version</h3><p>Current installed version: <strong>{gryphon?.version ?? "unavailable"}</strong></p><button type="button" className="settings-action" onClick={() => openChronosUpdates("gryphon")}>Check Gryphon for updates</button></section>
       </div>
     </UniversalCard>,
     updates: <UniversalCard title="Updates" {...cardProps("updates", "settings-updates-card")}>
@@ -470,20 +427,24 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     </UniversalCard>,
   };
 
-  const accessDirty = Boolean(accessKeys.current || accessKeys.next || accessKeys.repeat);
   return <>
     <div className="settings-stack">{order.map((key) => <div key={key}>{sections[key]}</div>)}</div>
 
-    {accessOpen && <Overlay title="Change Access Key" onClose={() => { setAccessOpen(false); setAccessKeys({ current: "", next: "", repeat: "" }); }} dismissible={!accessDirty && !accessPending}><form className="form-grid" onSubmit={changeAccessKey}><label><span>Current Access Key</span><input type="password" autoComplete="current-password" value={accessKeys.current} onChange={(event) => setAccessKeys({ ...accessKeys, current: event.target.value })} /></label><label><span>New Access Key</span><input type="password" minLength={12} autoComplete="new-password" value={accessKeys.next} onChange={(event) => setAccessKeys({ ...accessKeys, next: event.target.value })} /></label><label><span>Repeat new Access Key</span><input type="password" minLength={12} autoComplete="new-password" value={accessKeys.repeat} onChange={(event) => setAccessKeys({ ...accessKeys, repeat: event.target.value })} /></label><p className="form-hint">Other browser sessions will be revoked after the verifier changes.</p><div className="form-actions"><button type="button" disabled={accessPending} onClick={() => { setAccessOpen(false); setAccessKeys({ current: "", next: "", repeat: "" }); }} data-smart-hover>Cancel</button><SubmitButton pending={accessPending} label="Change Access Key" pendingLabel="Changing..." /></div></form></Overlay>}
+    {accessOpen && <Overlay title="Security" className="security-access-overlay" onClose={() => { setAccessOpen(false); setAccessKeys({ current: "", next: "", repeat: "" }); }} dismissible={!accessPending}><form className="form-grid" onSubmit={changeAccessKey}><label><span>Current Access Key</span><input type="password" autoComplete="current-password" value={accessKeys.current} onChange={(event) => setAccessKeys({ ...accessKeys, current: event.target.value })} /></label><label><span>New Access Key</span><input type="password" autoComplete="new-password" value={accessKeys.next} onChange={(event) => setAccessKeys({ ...accessKeys, next: event.target.value })} /></label><label><span>Repeat New Access Key</span><input type="password" autoComplete="new-password" value={accessKeys.repeat} onChange={(event) => setAccessKeys({ ...accessKeys, repeat: event.target.value })} /></label><p className="form-hint">Applying a new key revokes every other operator session.</p><div className="form-actions"><SubmitButton pending={accessPending} label="Change Access Key" pendingLabel="Changing..." /></div></form></Overlay>}
 
     {kernelTokenOpen && <Overlay title="Rotate Kernel access token" onClose={() => { setKernelTokenOpen(false); setKernelTokens({ next: "", repeat: "" }); }} dismissible={!kernelTokens.next && !kernelTokens.repeat && !kernelTokenPending}><form className="form-grid" onSubmit={rotateKernelToken}><p className="form-hint">The replacement is write-only and will be tested against <strong>{kernelUrl}</strong> before the current connection changes.</p><label><span>New Kernel token</span><input type="password" minLength={24} autoComplete="new-password" value={kernelTokens.next} onChange={(event) => setKernelTokens({ ...kernelTokens, next: event.target.value })} /></label><label><span>Repeat new Kernel token</span><input type="password" minLength={24} autoComplete="new-password" value={kernelTokens.repeat} onChange={(event) => setKernelTokens({ ...kernelTokens, repeat: event.target.value })} /></label><div className="form-actions"><button type="button" disabled={kernelTokenPending} onClick={() => { setKernelTokenOpen(false); setKernelTokens({ next: "", repeat: "" }); }} data-smart-hover>Cancel</button><SubmitButton pending={kernelTokenPending} label="Validate and rotate" pendingLabel="Validating..." /></div></form></Overlay>}
 
-    {gryphonConnectionOpen && <Overlay title="Link Chronos function" onClose={() => setGryphonConnectionOpen(false)} dismissible={!gryphonPending}><div className="bot-picker"><button type="button" onClick={() => void openGryphonManagement()}>Open Gryphon management</button><p className="form-hint">Select an available bot from the shared gateway.</p><div className="bot-picker-list">{gryphonBots.length ? gryphonBots.map((bot) => <label key={bot.id} className={bot.state === "ready" ? "" : "is-disabled"}><input type="radio" name="chronos-gryphon-bot" value={bot.id} checked={gryphonBotId === bot.id} disabled={bot.state !== "ready" || gryphonPending} onChange={() => setGryphonBotId(bot.id)} /><span><strong>{bot.username ? `@${bot.username}` : bot.alias}</strong><small>{bot.alias} · {bot.state}</small></span></label>) : <p>No ready bots are available. Open authorized gateway management to register a bot.</p>}</div><div className="form-actions"><button type="button" disabled={gryphonPending} onClick={() => setGryphonConnectionOpen(false)} data-smart-hover>Cancel</button><button type="button" disabled={!gryphonBotId || gryphonPending} onClick={() => void connectGryphon()} data-smart-hover>{gryphonPending ? "Linking…" : "Link function"}</button></div></div></Overlay>}
+    {gryphonConnectionOpen && <Overlay title="Gryphon Connection" className="gryphon-choice-overlay" onClose={() => setGryphonConnectionOpen(false)} dismissible={!gryphonPending}>
+      <p className="gryphon-choice-intro">Select a connection already applied through Gryphon</p>
+      <div className="gryphon-choice-layout"><div className="gryphon-choice-list">{gryphonBots.some((bot) => bot.state === "ready" || bot.id === gryphon?.bot?.id) ? gryphonBots.filter((bot) => bot.state === "ready" || bot.id === gryphon?.bot?.id).map((bot) => <button key={bot.id} type="button" className={`gryphon-choice${gryphonBotId === bot.id ? " is-selected" : ""}`} aria-pressed={gryphonBotId === bot.id} disabled={bot.state !== "ready" || gryphonPending} onClick={() => void connectGryphon(bot.id)}><span className="gryphon-choice-check" aria-hidden="true" />{bot.username ? `@${bot.username}` : bot.alias}</button>) : <p>No paired bots are available. Register and pair one with sudo updater tui.</p>}</div>
+        {gryphon?.connected && gryphon.bot && <div className="gryphon-adapter-config"><strong>Active adapter config:</strong><span>Bot: {gryphon.bot.alias}</span><span>{gryphon.bot.username ? `Telegram: @${gryphon.bot.username}` : "Telegram account paired in Gryphon"}</span><span>Chronos function: active</span></div>}
+      </div>
+      {gryphon?.connected && <button type="button" className="gryphon-unlink-action" disabled={gryphonPending} onClick={() => void disconnectGryphon()}>Unlink all adapters</button>}
+    </Overlay>}
 
     {restoreOpen && <Overlay title="Restore Chronos snapshot" onClose={closeRestore} dismissible={!restoreFile && !restorePending}><div className="restore-flow"><input ref={fileRef} className="visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectRestore(file); }} /><button type="button" disabled={restorePending} onClick={() => fileRef.current?.click()} data-smart-hover>Select native archive</button>{restoreFile && <div className="archive-metadata"><span>File</span><strong>{restoreFile.name.replace(/[\\/\u0000-\u001f]/g, "_")}</strong><span>Size</span><strong>{(restoreFile.size / 1024).toFixed(1)} KiB</strong>{inspection && <><span>Schema</span><strong>{inspection.schema}</strong><span>Created</span><strong>{inspection.created_at ? localDate(inspection.created_at, values) : "Unknown"}</strong><span>Sessions</span><strong>{inspection.session_count}</strong><span>Mode</span><strong>Replace current Chronos state</strong></>}</div>}{restoreFile && !inspection && !restoreError && <p className="form-hint">Validating archive structure and checksum…</p>}{restoreError && <p className="inline-error" role="alert">{restoreError}</p>}<div className="form-actions"><button type="button" disabled={restorePending} onClick={closeRestore} data-smart-hover>Cancel</button><button type="button" className="danger-button" disabled={!inspection || restorePending} onClick={() => void restore()} data-smart-hover>{restorePending ? "Restoring..." : "Restore and replace"}</button></div></div></Overlay>}
 
 
 
-    {gryphonChallenge && <Overlay title="Link Telegram account" onClose={() => void cancelGryphonChallenge()}><div className="form-grid"><p className="form-hint">Send this command to {gryphonChallenge.botUsername ? `@${gryphonChallenge.botUsername}` : "the connected bot"}. It can be used once and expires {localDate(gryphonChallenge.expiresAt, values)}.</p><div className="one-time-code"><strong>{gryphonChallenge.command}</strong></div><div className="form-actions"><button type="button" onClick={() => void navigator.clipboard.writeText(gryphonChallenge.command).then(() => notify("success", "Command copied."))} data-smart-hover>Copy command</button><button type="button" onClick={() => void cancelGryphonChallenge()} data-smart-hover>Cancel link code</button></div></div></Overlay>}
   </>;
 }
