@@ -49,7 +49,7 @@ that pinned bundle. Existing release tags and trust anchors stay immutable.
 3. Stream the saved ZIP from the operator PC to the root migration command, for
    example (replace the host, head and exact published version):
 
-   `ssh root@host 'updater migrate-head --head chronos --version 0.2.0 --saved-backup-stdin --confirm-saved' < chronos-backup.zip`
+   `ssh root@host 'updater migrate-head --head chronos --version 0.2.1 --saved-backup-stdin --confirm-saved' < chronos-backup.zip`
 
    The command requires root and explicit saved-copy confirmation. It reads at
    most 128 MiB in memory, binds the original bytes to the head and exact release,

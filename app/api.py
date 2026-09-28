@@ -445,7 +445,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Chronos",
-        version="0.2.0",
+        version="0.2.1",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
