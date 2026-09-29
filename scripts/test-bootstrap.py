@@ -48,11 +48,16 @@ with tempfile.TemporaryDirectory(prefix="head-bootstrap-test-") as directory:
     (helper / "systemd/updater.service").write_text("[Service]\nExecStart=/usr/bin/updater\n")
     for scope in ["updater", "neptune", "gryphon"]:
         shutil.copyfile(output / (service + ".pem"), helper / "release-trust" / (scope + ".pem"))
+    for scope in ("neptune", "gryphon"):
+        bundled = work / "helpers" / scope
+        bundled.mkdir(parents=True)
+        (bundled / (scope + "-linux-release-linux-x64.json.sig.json")).write_text("{}")
     env.update({"GITHUB_REPOSITORY": "psewdon1m-exocortex/" + service,
                 "IMAGE_REFERENCE": "ghcr.io/psewdon1m-exocortex/" + service,
                 "IMAGE_DIGEST": "sha256:" + "a" * 64,
                 "UPDATER_BUNDLE_DIR": str(helper),
-                "UPDATER_BUNDLE_VERSION": (root / ".release/updater.version").read_text().strip()})
+                "UPDATER_BUNDLE_VERSION": (root / ".release/updater.version").read_text().strip(),
+                "HOST_HELPER_BUNDLE_DIR": str(work / "helpers")})
     run(["bash", "scripts/build-release.sh", version, str(output)], env=env)
     manifest = output / (service + "-release.json")
     run(["node", "scripts/sign-release.mjs", str(manifest)], env=env)

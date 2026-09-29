@@ -164,6 +164,11 @@ install_chronos() {
   docker network inspect exocortex-services >/dev/null 2>&1 || docker network create exocortex-services >/dev/null
   cd "$INSTALL_DIR"
   "$INSTALL_DIR/updater/install.sh" chronos "$ENV_FILE" "$INSTALL_DIR/updater/updater-linux-amd64"
+  if [ -f /etc/exocortex/updater-kernel.token ] && [ -n "$(get_env KERNEL_URL)" ]; then
+    updater host configure-kernel --url "$(get_env KERNEL_URL)" --token-file /etc/exocortex/updater-kernel.token
+  fi
+  updater neptune install --bundle "$INSTALL_DIR/helpers/neptune"
+  updater gryphon install --bundle "$INSTALL_DIR/helpers/gryphon"
   docker compose --env-file "$ENV_FILE" -f compose.production.yaml config -q
   docker compose --env-file "$ENV_FILE" -f compose.production.yaml create
   container=$(docker compose --env-file "$ENV_FILE" -f compose.production.yaml ps -aq chronos)

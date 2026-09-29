@@ -32,6 +32,12 @@ cp "$root/compose.yaml" "$root/compose.production.yaml" "$root/compose.updater.y
   "$root/.env.example" "$root/install.sh" "$root/bootstrap.sh" \
   "$root/nginx.security.conf" "$root/README.md" "$root/DEPLOYMENT.md" "$root/nginx.server.example.conf" "$stage/"
 cp -R "$updater_dir" "$stage/updater"
+helper_root="${HOST_HELPER_BUNDLE_DIR:-$root/.release-inputs/helpers}"
+mkdir -p "$stage/helpers"
+for helper in neptune gryphon; do
+  test -f "$helper_root/$helper/$helper-linux-release-linux-x64.json.sig.json"
+  cp -R "$helper_root/$helper" "$stage/helpers/"
+done
 find "$stage/updater" -type f -name '*.sh' -exec chmod 0755 {} +
 chmod 0755 "$stage/install.sh" "$stage/bootstrap.sh" "$stage/updater/updater-linux-amd64"
 sed -i \
