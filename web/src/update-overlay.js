@@ -154,11 +154,8 @@ export function openUpdateOverlay(options) {
         if (handle) { create.textContent = "Saving backup…"; const file = await handle.createWritable(); try { await file.write(archive); await file.close(); } catch (failure) { await file.abort().catch(() => {}); throw failure; } if (!w.dialog.open || closed) return; w.dialog.close(); await submit(version, archive, receipt, id); }
         else {
           const url = URL.createObjectURL(archive); const link = element("a"); link.href = url; link.download = payload.filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-          create.remove();
-          w.content.insertBefore(element("p", "The download has started. Verify that the ZIP is saved on your computer before continuing. A browser download request alone cannot confirm this."), actions);
-          const confirm = element("label", undefined, "saved"); const checkbox = element("input"); checkbox.type = "checkbox"; confirm.append(checkbox, element("span", "I have saved the ZIP on my computer.")); w.content.insertBefore(confirm, actions);
-          const install = button(`Install ${version}`, () => { w.dialog.close(); void submit(version, archive, receipt, id); }, "danger"); install.disabled = true;
-          checkbox.addEventListener("change", () => { install.disabled = !checkbox.checked; }); actions.append(install);
+          w.dialog.close();
+          await submit(version, archive, receipt, id);
         }
       } catch (failure) { if (failure.name !== "AbortError") fault.textContent = failure.message; create.disabled = false; create.textContent = "Create backup and install"; }
       finally { busy = false; }
