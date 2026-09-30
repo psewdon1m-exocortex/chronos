@@ -67,7 +67,9 @@ def mount_update_flow(app, operator, mutation_operator, build_backup):
     creating = False
 
     async def candidate(request: Request, component: str):
-        if component not in {"chronos", "updater", "neptune"}:
+        if component == "updater":
+            raise HTTPException(403, "Check Updater releases with sudo updater tui on the host")
+        if component not in {"chronos", "neptune"}:
             raise HTTPException(400, "Unknown update component")
         client = request.app.state.updater
         if (await client.status()).get("update_protocol") != 2:
@@ -101,12 +103,14 @@ def mount_update_flow(app, operator, mutation_operator, build_backup):
     @router.post("/install/{component}", dependencies=[Depends(mutation_operator)])
     async def install(request: Request, component: str):
         client = request.app.state.updater
+        if component == "updater":
+            raise HTTPException(403, "Update Updater with sudo updater tui on the host")
         if component == "chronos":
             if request.headers.get("x-update-saved") != "1":
                 raise HTTPException(400, "Save the ZIP on your computer before installing")
             archive = await read_zip(request)
             return await client.request("POST", "/v2/updates", saved_backup(archive, request.headers.get("x-update-receipt", ""), client.head_id, client.control_token))
-        if component not in {"updater", "neptune"}:
+        if component != "neptune":
             raise HTTPException(400, "Unknown update component")
         body = await request.json()
         if not isinstance(body, dict) or not STABLE.fullmatch(str(body.get("version", ""))) or not re.fullmatch(r"[0-9a-f-]{36}", str(body.get("request_id", "")), re.I):

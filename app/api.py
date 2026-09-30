@@ -1103,7 +1103,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/updates/agent/install", status_code=202)
     async def updater_self_update(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        return await request.app.state.updater.lifecycle("updater-self-update")
+        raise HTTPException(status_code=403, detail="Update Updater with sudo updater tui on the host")
 
     @app.get("/api/gryphon/status")
     async def gryphon_status(request: Request, _: dict[str, Any] = Depends(operator)):

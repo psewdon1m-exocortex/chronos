@@ -138,12 +138,6 @@ class UpdaterClient:
         return await asyncio.to_thread(self._request, "POST", "/v1/components/neptune-linux/check",
             {"head_id": self.head_id, "current_version": current_version}, True, 30)
 
-    async def lifecycle(self, kind: str, **fields: str) -> dict[str, Any]:
-        if kind != "updater-self-update":
-            raise UpdaterError("Unsupported lifecycle operation", 400)
-        return await asyncio.to_thread(self._request, "POST", f"/v1/lifecycle/{kind}",
-            {"head_id": self.head_id, **fields}, True, 30)
-
     async def initialize_neptune(self, enrollment_code: str, export_url: str, request_id: str | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._request,

@@ -408,7 +408,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         <div className="service-status-row"><span>Local Updater agent:</span><span className={updates?.updater.available ? "status-success" : "status-error"}>{updates?.updater.available ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={updates?.updater.available ? "success" : "danger"} /></div>
         <div className="service-status-row"><span>Kernel Register:</span><span className={data.runtime.register_revision ? "status-success" : "status-error"}>{data.runtime.register_revision ? "Service Reachability" : "Service Unavailable"}</span><StatusSquare state={data.runtime.register_revision ? "success" : "danger"} /></div>
         <button type="button" className="settings-action" onClick={() => openChronosUpdates()} data-smart-hover>Check for updates</button>
-      </div><div className="settings-group updater-version-group"><h3>Updater version</h3><p>Current installed version: {updates?.updater.version ?? "unavailable"}</p><button type="button" className="settings-action" onClick={() => openChronosUpdates("updater")} data-smart-hover>Check Updater for updates</button></div></div>
+      </div></div>
     </UniversalCard>,
     logs: <UniversalCard title="Logs" {...cardProps("logs")}>
       <ServiceLogsPanel base="/api/logs" download="/api/logs/download" />

@@ -489,13 +489,10 @@ pre {
 .settings-updates-card { min-height: 0; }
 .settings-updates-card .updates-content { display: block; padding: 28px 38px 54px; }
 .settings-updates-card .settings-group { display: block; }
-.settings-updates-card .settings-group + .settings-group { border-top: 0; padding-top: 0; }
 .settings-updates-card .update-pipeline-group > p { margin-bottom: 6px; }
 .settings-updates-card .update-pipeline-group .service-status-row:first-of-type { margin-top: 29px; }
 .settings-updates-card .update-pipeline-group .service-status-row + .service-status-row { margin-top: 12px; }
 .settings-updates-card .update-pipeline-group > .settings-action { margin-top: 35px; }
-.settings-updates-card .updater-version-group { margin-top: 41px; }
-.settings-updates-card .updater-version-group > p { margin: 8px 0 12px; }
 .logs-command { display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 30px 38px 24px; }
 .logs-command p { margin: 0; color: var(--text-secondary); }
 .event-stream { max-height: 460px; margin: 0 38px 38px; overflow-y: auto; border: 1px solid var(--line-inner); scrollbar-width: none; }
