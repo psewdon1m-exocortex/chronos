@@ -1030,7 +1030,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/neptune/policy/runs", status_code=202)
     async def create_backup_run(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
-        return await policy_for(request).runs("POST", body)
+        raise HTTPException(status_code=403, detail="Manual Neptune runs are unavailable; configure the automatic schedule in Settings")
 
     @app.post("/api/internal/neptune/backup")
     async def export_neptune_backup(request: Request, authorization: str | None = Header(default=None)):
@@ -1075,6 +1075,15 @@ def create_app() -> FastAPI:
         )
         return result
 
+    @app.post("/api/neptune/unlink", status_code=202)
+    async def neptune_unlink(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        result = await request.app.state.updater.unlink_neptune()
+        await request.app.state.store.audit(
+            status="success", action="neptune.unlink", target=str(result.get("id") or "accepted"),
+            actor="operator", message="Neptune unlink handed to local Updater",
+        )
+        return result
+
     @app.put("/api/neptune/schedule", status_code=204)
     async def neptune_schedule(request: Request, body: NeptuneScheduleInput, _: dict[str, Any] = Depends(mutation_operator)):
         raise HTTPException(status_code=426, detail="Use the versioned service backup policy")
@@ -1085,17 +1094,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/neptune/update/check")
     async def neptune_update_check(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
-        status = await request.app.state.neptune.status()
-        return await request.app.state.updater.check_neptune(str(status["version"]))
+        raise HTTPException(status_code=403, detail="Check Neptune releases with sudo updater tui on the host")
 
     @app.post("/api/neptune/update/install")
     async def neptune_update_install(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):
-        requested_version = str(body.get("version") or "")
-        status = await request.app.state.neptune.status()
-        update = await request.app.state.updater.check_neptune(str(status["version"]))
-        if not update["update_available"] or update["available_version"] != requested_version:
-            raise HTTPException(status_code=409, detail="Requested Neptune version is not the current upgrade candidate")
-        return await request.app.state.updater.update_neptune(requested_version)
+        raise HTTPException(status_code=403, detail="Update Neptune with sudo updater tui on the host")
 
     @app.post("/api/gryphon/initialize", status_code=202)
     async def gryphon_initialize(request: Request, body: dict[str, Any], _: dict[str, Any] = Depends(mutation_operator)):

@@ -69,7 +69,9 @@ def mount_update_flow(app, operator, mutation_operator, build_backup):
     async def candidate(request: Request, component: str):
         if component == "updater":
             raise HTTPException(403, "Check Updater releases with sudo updater tui on the host")
-        if component not in {"chronos", "neptune"}:
+        if component == "neptune":
+            raise HTTPException(403, "Check Neptune releases with sudo updater tui on the host")
+        if component != "chronos":
             raise HTTPException(400, "Unknown update component")
         client = request.app.state.updater
         if (await client.status()).get("update_protocol") != 2:
@@ -105,17 +107,14 @@ def mount_update_flow(app, operator, mutation_operator, build_backup):
         client = request.app.state.updater
         if component == "updater":
             raise HTTPException(403, "Update Updater with sudo updater tui on the host")
+        if component == "neptune":
+            raise HTTPException(403, "Update Neptune with sudo updater tui on the host")
         if component == "chronos":
             if request.headers.get("x-update-saved") != "1":
                 raise HTTPException(400, "Save the ZIP on your computer before installing")
             archive = await read_zip(request)
             return await client.request("POST", "/v2/updates", saved_backup(archive, request.headers.get("x-update-receipt", ""), client.head_id, client.control_token))
-        if component != "neptune":
-            raise HTTPException(400, "Unknown update component")
-        body = await request.json()
-        if not isinstance(body, dict) or not STABLE.fullmatch(str(body.get("version", ""))) or not re.fullmatch(r"[0-9a-f-]{36}", str(body.get("request_id", "")), re.I):
-            raise HTTPException(400, "An exact stable version and request ID are required")
-        return await client.request("POST", f"/v2/components/{component}/updates", {"head_id": client.head_id, "version": body["version"], "request_id": body["request_id"]})
+        raise HTTPException(400, "Unknown update component")
 
     @router.get("/jobs", dependencies=[Depends(operator)])
     async def jobs(request: Request):

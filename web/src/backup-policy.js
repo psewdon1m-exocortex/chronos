@@ -9,7 +9,7 @@ function node(tag, text, className) {
 
 export function mountBackupPolicy(root, options) {
   root.classList.add("exo-backup-policy");
-  let closed = false, policy, jobs = [], busy = false, loading = false, timer, failure = "", failureCode = "", pending;
+  let closed = false, policy, busy = false, loading = false, timer, failure = "", failureCode = "", pending;
   const drafts = new Map(), controllers = new Set();
   const key = "exocortex.backup-policy.v1." + options.service;
   try { pending = JSON.parse(localStorage.getItem(key) || "null"); } catch { /* Only an operation hint. */ }
@@ -17,6 +17,7 @@ export function mountBackupPolicy(root, options) {
     pending = value;
     try { if (value) localStorage.setItem(key, JSON.stringify(value)); else localStorage.removeItem(key); } catch { /* Server replay is authoritative. */ }
   };
+  if (pending && (pending.method !== "PUT" || pending.suffix !== "")) remember(null);
   async function request(suffix = "", method = "GET", body) {
     const controller = new AbortController(); controllers.add(controller);
     const timeout = setTimeout(() => controller.abort(), 25000);
@@ -48,12 +49,36 @@ export function mountBackupPolicy(root, options) {
     if (!draft.dirty) { draft.value = String(current); draft.confirmed = current; draft.revision = policy.revision; }
     return draft;
   }
+  const schedule = (enabled, intervalHours, expectedRevision) => ({
+    kind: policy.mirror ? "schedule-all" : "schedule",
+    ...(policy.mirror ? {} : { pipeline: "archive" }), enabled, intervalHours,
+    expectedRevision, requestId: crypto.randomUUID(),
+  });
   const stopGeometry = bindActionGeometry(root);
   const summary = node("p", "", "exo-policy-summary"), error = node("p", "", "exo-agent-error");
   error.setAttribute("role", "alert"); summary.setAttribute("role", "status");
   const retry = action("Retry policy status", refresh);
   const resume = action("Verify and resume restored policy", () => mutate({ kind: "resume", expectedRevision: policy.revision, requestId: crypto.randomUUID() }));
-  root.replaceChildren(summary, error, retry, resume);
+  const statuses = node("div", undefined, "exo-policy-statuses");
+  const statusRow = label => {
+    const row = node("div", undefined, "exo-agent-status exo-policy-status");
+    const value = node("strong"); value.append(node("span", "Not verified"), node("i"));
+    row.append(node("span", label), value);
+    return row;
+  };
+  const fallbackArchive = statusRow(options.service === "mastermind" ? "Basic pipeline status:" : "Pipeline status:");
+  const fallbackMirror = statusRow("Advanced vault pipeline status:");
+  fallbackMirror.hidden = options.service !== "mastermind";
+  statuses.append(fallbackArchive, fallbackMirror);
+  const fallbackControls = node("div", undefined, "exo-policy-controls");
+  const fallbackToggle = node("label", undefined, "exo-policy-toggle"), fallbackCheckbox = node("input");
+  fallbackCheckbox.type = "checkbox"; fallbackCheckbox.disabled = true;
+  fallbackToggle.append(fallbackCheckbox, node("span", "Enable automatic backups"));
+  const fallbackInterval = node("label", undefined, "exo-policy-interval"), fallbackInput = node("input");
+  fallbackInput.type = "number"; fallbackInput.value = "24"; fallbackInput.disabled = true;
+  fallbackInterval.append(node("span", "Interval in hours"), fallbackInput);
+  fallbackControls.append(fallbackToggle, fallbackInterval);
+  root.replaceChildren(statuses, fallbackControls, summary, error, retry, resume);
   const panels = new Map();
   function makePanel(kind) {
     const group = node("section", undefined, "exo-agent-group"), controls = node("div", undefined, "exo-policy-controls");
@@ -62,21 +87,20 @@ export function mountBackupPolicy(root, options) {
     checkbox.setAttribute("aria-label", "Enable automatic backups · " + kind);
     toggle.append(checkbox, node("span", "Enable automatic backups"));
     const label = node("label", undefined, "exo-policy-interval"), input = node("input");
-    input.type = "number"; input.min = "1"; input.step = "1"; input.max = kind === "mirror" ? "168" : "8760";
+    input.type = "number"; input.min = "1"; input.step = "1"; input.max = policy.mirror ? "168" : "8760";
     input.setAttribute("aria-label", "Interval in hours · " + kind);
     const inlineError = node("span", "", "exo-agent-error"); inlineError.id = "interval-error-" + crypto.randomUUID();
     inlineError.setAttribute("role", "alert"); input.setAttribute("aria-describedby", inlineError.id);
     label.append(node("span", "Interval in hours"), input, inlineError);
-    const current = () => kind === "mirror" ? policy[kind].intervalMinutes / 60 : policy[kind].intervalHours;
+    const current = () => policy.archive.intervalHours;
     const commit = () => {
       const draft = draftFor(kind, current());
       if (busy || !draft.dirty || draft.review) return;
-      const value = Number(draft.value), max = kind === "mirror" ? 168 : 8760;
+      const value = Number(draft.value), max = policy.mirror ? 168 : 8760;
       if (!draft.value.trim() || !Number.isInteger(value) || value < 1 || value > max) {
         draft.error = "Enter a whole number of hours from 1 to " + max + "."; render(); return;
       }
-      void mutate({ kind: "schedule", pipeline: kind, enabled: policy[kind].enabled, intervalHours: value,
-        expectedRevision: draft.revision, requestId: crypto.randomUUID() }, kind);
+      void mutate(schedule(policy.archive.enabled, value, draft.revision), "archive");
     };
     input.oninput = () => {
       const draft = draftFor(kind, current());
@@ -86,19 +110,23 @@ export function mountBackupPolicy(root, options) {
     };
     input.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); commit(); } };
     input.onblur = commit;
-    checkbox.onchange = () => void mutate({ kind: "schedule", pipeline: kind, enabled: checkbox.checked,
-      intervalHours: current(), expectedRevision: policy.revision, requestId: crypto.randomUUID() });
-    const run = action(kind === "archive" ? "Back up to Saturn now" : "Mirror to Saturn now", () => mutate(
-      { pipeline: kind, requestId: crypto.randomUUID() }, undefined, "/runs", "POST"));
-    controls.append(toggle, label, run);
-    const imported = node("p", "", "exo-agent-muted"), observed = node("p", "", "exo-agent-muted"), state = node("p"), job = node("p", "", "exo-agent-job");
+    checkbox.onchange = () => {
+      if (policy.mirror && current() > 168) { failure = "Choose a shared interval from 1 to 168 hours before changing both pipelines."; render(); return; }
+      void mutate(schedule(checkbox.checked, current(), policy.revision));
+    };
+    controls.append(toggle, label);
+    const imported = node("p", "", "exo-agent-muted"), observed = node("p", "", "exo-agent-muted"), state = node("p"), drift = node("p", "", "exo-agent-muted");
     const review = node("p"), discard = action("Discard interval draft", () => { drafts.delete(kind); render(); });
     const apply = action("Apply reviewed interval", () => { const draft = draftFor(kind, current()); draft.review = false; draft.revision = policy.revision; commit(); });
-    const heading = node("h3", kind === "archive" ? "Automatic recovery archive" : "Automatic dedicated mirror");
-    const details = node("div", undefined, "exo-policy-observations"); details.append(imported, observed, state, job);
-    group.append(heading, controls, details, review, discard, apply);
+    const heading = statusRow(kind === "archive"
+      ? policy.mirror ? "Basic pipeline status:" : "Pipeline status:"
+      : "Advanced vault pipeline status:");
+    const details = node("div", undefined, "exo-policy-observations"); details.append(imported, observed, state);
+    statuses.append(heading);
+    if (kind === "archive") group.append(controls, drift, review, discard, apply);
+    group.append(details);
     root.insertBefore(group, summary);
-    return { group, heading, input, checkbox, run, inlineError, imported, observed, state, job, review, discard, apply };
+    return { group, heading, input, checkbox, inlineError, imported, observed, state, drift, review, discard, apply };
   }
   function render() {
     if (closed) return;
@@ -106,33 +134,52 @@ export function mountBackupPolicy(root, options) {
     error.textContent = unconfigured ? "" : failure; retry.hidden = unconfigured || !failure; retry.disabled = busy;
     resume.hidden = !policy?.paused; resume.disabled = busy;
     summary.hidden = !policy && !loading && !unconfigured;
-    if (!policy) { summary.className = "exo-policy-summary exo-agent-muted"; summary.textContent = unconfigured ? "Initialize Neptune to enable automatic backups." : loading ? "Loading backup policy…" : ""; return; }
+    if (!policy) {
+      fallbackArchive.hidden = false; fallbackMirror.hidden = options.service !== "mastermind";
+      fallbackControls.hidden = false;
+      fallbackArchive.dataset.state = fallbackMirror.dataset.state = "unavailable";
+      for (const panel of panels.values()) { panel.heading.hidden = true; panel.group.hidden = true; }
+      summary.className = "exo-policy-summary exo-agent-muted"; summary.textContent = unconfigured ? "Initialize Neptune to enable automatic backups." : loading ? "Loading backup policy…" : "";
+      return;
+    }
+    fallbackArchive.hidden = fallbackMirror.hidden = fallbackControls.hidden = true;
     const applied = !failure && policy.appliedRevision === policy.revision;
     summary.textContent = policy.paused ? "Restored policy · pending verification. Execution is paused." : applied ? "Schedule applied · revision " + policy.revision
       : "Policy saved · pending application (desired " + policy.revision + ", applied " + policy.appliedRevision + ")";
     summary.className = "exo-policy-summary " + (policy.paused || !applied ? "exo-agent-muted" : "exo-agent-success");
     for (const kind of ["archive", "mirror"]) {
-      if (!policy[kind]) { if (panels.has(kind)) panels.get(kind).group.hidden = true; continue; }
+      if (!policy[kind]) { if (panels.has(kind)) { panels.get(kind).group.hidden = true; panels.get(kind).heading.hidden = true; } continue; }
       if (!panels.has(kind)) panels.set(kind, makePanel(kind));
       const panel = panels.get(kind), settings = policy[kind], current = kind === "mirror" ? settings.intervalMinutes / 60 : settings.intervalHours;
       panel.group.hidden = false;
-      panel.heading.hidden = !policy.archive || !policy.mirror;
-      const draft = draftFor(kind, current);
-      panel.checkbox.checked = settings.enabled; panel.checkbox.disabled = busy || policy.paused;
-      panel.input.disabled = busy || policy.paused;
-      if (document.activeElement !== panel.input) panel.input.value = draft.value;
-      panel.input.setAttribute("aria-invalid", String(Boolean(draft.error))); panel.inlineError.textContent = draft.error;
-      const recent = jobs.find(job => job.kind === kind + ".run" || job.pipeline === kind);
-      panel.run.disabled = busy || policy.paused || recent?.state === "pending";
+      panel.heading.hidden = false;
+      panel.heading.firstChild.textContent = kind === "archive" ? policy.mirror ? "Basic pipeline status:" : "Pipeline status:" : "Advanced vault pipeline status:";
+      if (kind === "archive") {
+        const draft = draftFor(kind, current);
+        panel.checkbox.checked = settings.enabled; panel.checkbox.indeterminate = Boolean(policy.mirror && settings.enabled !== policy.mirror.enabled);
+        panel.checkbox.disabled = busy || policy.paused;
+        panel.input.max = policy.mirror ? "168" : "8760";
+        panel.input.disabled = busy || policy.paused;
+        if (document.activeElement !== panel.input) panel.input.value = draft.value;
+        panel.input.setAttribute("aria-invalid", String(Boolean(draft.error))); panel.inlineError.textContent = draft.error;
+        panel.drift.hidden = !policy.mirror || settings.enabled === policy.mirror.enabled && settings.intervalHours * 60 === policy.mirror.intervalMinutes;
+        panel.drift.textContent = "The two saved schedules differ. Choose an interval and save it to align both pipelines.";
+        panel.discard.hidden = !(draft.dirty && draft.error); panel.discard.disabled = busy;
+        panel.review.hidden = panel.apply.hidden = !draft.review; panel.apply.disabled = busy;
+        panel.review.textContent = "Current interval: " + current + " hours. Your proposed interval: " + draft.value + " hours.";
+      }
       panel.imported.hidden = kind !== "mirror" || Number.isInteger(current);
       panel.imported.textContent = "Imported interval: " + settings.intervalMinutes + " minutes. Preserved exactly until you choose whole hours.";
       const observed = policy.observed?.[kind] ?? {};
+      const online = policy.observed?.online;
+      const unhealthy = Boolean(observed.error) || /error|fail|denied|unavailable/i.test(String(observed.state || ""));
+      const ready = online === true && applied && !policy.paused && Boolean(observed.state) && !unhealthy;
+      panel.heading.dataset.state = ready ? "ready" : online === undefined ? "busy" : "unavailable";
+      panel.heading.querySelector("strong span").textContent = ready ? "Reachability"
+        : policy.paused ? "Paused" : online === false ? "Unavailable" : unhealthy ? "Pipeline error"
+          : !applied ? "Pending application" : "Not verified";
       panel.observed.textContent = "Next run: " + stamp(observed.nextRunAt) + " · Last successful commitment: " + stamp(observed.lastSuccessAt);
       panel.state.textContent = "Pipeline state: " + (observed.state || "Not reported") + (observed.error ? " · " + observed.error : "");
-      panel.job.hidden = !recent; panel.job.textContent = recent ? "Run " + recent.id + " · " + recent.state + (recent.error ? " · " + recent.error : "") : "";
-      panel.discard.hidden = !(draft.dirty && draft.error); panel.discard.disabled = busy;
-      panel.review.hidden = panel.apply.hidden = !draft.review; panel.apply.disabled = busy;
-      panel.review.textContent = "Current interval: " + current + " hours. Your proposed interval: " + draft.value + " hours.";
     }
   }
   async function mutate(body, draftKind, suffix = "", method = "PUT") {
@@ -162,8 +209,6 @@ export function mountBackupPolicy(root, options) {
     const current = await request();
     if (current.schema !== "exocortex.backup.policy.v1") throw new Error("The service-owned backup policy protocol is unavailable");
     policy = current;
-    const history = await request("/runs");
-    jobs = Array.isArray(history) ? history : history.jobs ?? history.runs ?? [];
   }
   async function refresh() {
     if (loading || busy || closed) return;
@@ -174,7 +219,7 @@ export function mountBackupPolicy(root, options) {
     finally { loading = false; render(); }
   }
   void (async () => {
-    if (pending?.body?.requestId && ["PUT", "POST"].includes(pending.method) && ["", "/runs"].includes(pending.suffix))
+    if (pending?.body?.requestId && pending.method === "PUT" && pending.suffix === "")
       await mutate(pending.body, pending.draftKind, pending.suffix, pending.method);
     else await refresh();
   })();

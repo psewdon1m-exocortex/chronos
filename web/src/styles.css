@@ -720,3 +720,10 @@ pre {
   .settings-security-card .settings-groups { padding:24px 20px 30px; }
   .settings-security-card .settings-group + .settings-group { margin-top:44px; }
 }
+/* Backup reference: manual export, agent schedule, then restore. */
+:root .settings-card.settings-backup-card .settings-groups.backup-content { gap:54px; }
+.settings-backup-card .settings-group:first-child > .settings-action,
+.settings-backup-card .settings-group:last-child > .settings-action { width:min(742px,100%); }
+.settings-backup-card .backup-neptune-group .service-status-row + .exo-backup-policy { margin-top:10px; }
+.settings-backup-card .backup-neptune-group > :is(.backup-link-action,.backup-unlink-action) { width:280px; margin-top:20px; }
+.settings-backup-card .backup-unlink-action:disabled { color:var(--danger) !important; border-color:var(--danger) !important; opacity:1; }

@@ -26,7 +26,7 @@ failed, unknown or unsupported `N/A` evidence blocks publication. The workflow e
 
 ## Автоматические резервные копии
 
-После обычной установки создайте в Saturn одноразовый Neptune setup code. Откройте Settings → Backup, нажмите **Initialize Neptune** и введите код. Интерфейс устанавливает отсутствующий агент или подключает существующий; `sudo chronos-install backup` остаётся эквивалентным CLI-сценарием. Расписание задаётся в Saturn → Synchronization.
+После обычной установки создайте в Saturn одноразовый Neptune setup code. Откройте Settings → Backup, нажмите **Initialize Neptune** и введите код. Интерфейс подключает профиль Chronos к общему агенту; если агент отсутствует на старом или повреждённом хосте, его восстанавливают через установщик или `sudo updater tui`. `sudo chronos-install backup` остаётся резервным CLI-сценарием. Автоматическое расписание задаётся в Settings → Backup Chronos; Saturn → Synchronization показывает состояние и управляет identity и setup codes.
 
 Chronos is a single-operator time-tracking service for the Exocortex ecosystem.
 
@@ -214,8 +214,9 @@ Chronos keeps the returned plaintext only in process memory.
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
 The UI uses Updater **0.5.0**, an exact selected version, the standard ZIP saved
-on the operator PC, and durable status/progress. Helper updates use the same
-dialog without a backup. No update ZIP is retained on the application host.
+on the operator PC, and durable status/progress for Chronos releases. Shared
+Updater, Neptune, Gryphon and Wyvern release operations use `sudo updater tui`
+on the host. No update ZIP is retained on the application host.
 
 Release builds pin the published Updater 0.5.0 installer by the SHA-256 in
 `.release/updater.sha256` and verify it before extraction. This digest was

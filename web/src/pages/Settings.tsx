@@ -47,7 +47,7 @@ interface GryphonBot {
   selected: boolean;
 }
 
-interface NeptuneAvailability { installed: boolean | null; linked: boolean | null; state: "linked" | "unlinked" | "unavailable" | "authorization_failed"; version?: string | null }
+interface NeptuneAvailability { installed: boolean | null; linked: boolean | null; state: "linked" | "unlinking" | "unlinked" | "unavailable" | "authorization_failed"; version?: string | null }
 
 const FALLBACK_ZONES = ["UTC", "Europe/Istanbul", "Europe/Moscow", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Tokyo"];
 
@@ -100,6 +100,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState("");
   const [neptune, setNeptune] = useState<NeptuneAvailability | null>(null);
+  const [neptuneUnlinking, setNeptuneUnlinking] = useState(false);
   const [gryphon, setGryphon] = useState<GryphonStatus | null>(null);
   const [gryphonBots, setGryphonBots] = useState<GryphonBot[]>([]);
   const [gryphonBotId, setGryphonBotId] = useState("");
@@ -296,6 +297,25 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     },
   });
 
+  const unlinkNeptune = async () => {
+    if (!(["linked", "unlinking"].includes(neptune?.state ?? "")) || !await confirmAgentAction({
+      title: "Unlink Neptune agent", confirmLabel: "Unlink agent",
+      message: "Automatic Chronos backups will stop. Saved archives remain in Saturn. Other services and the shared Neptune agent stay connected. Chronos will need a new setup code to link again.",
+    })) return;
+    setNeptuneUnlinking(true);
+    try {
+      const accepted = await api<{ id: string }>("/api/neptune/unlink", { method: "POST", body: "{}" });
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        const job = await api<{ state: string; message?: string }>(`/api/updates/jobs/${encodeURIComponent(accepted.id)}`);
+        if (job.state === "COMPLETED") { await loadNeptune(); notify("success", "Chronos unlinked from Neptune. Automatic backups are off."); return; }
+        if (job.state === "FAILED") throw new Error(job.message || "Neptune unlink failed");
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      throw new Error("Neptune is still finishing an accepted backup. Check its status before retrying.");
+    } catch (error) { notify("error", error instanceof Error ? error.message : "Neptune unlink failed."); }
+    finally { setNeptuneUnlinking(false); }
+  };
+
   const connectGryphon = async (botId: string) => {
     if (!botId || (botId === gryphon?.bot?.id && gryphon.binding)) return;
     setGryphonPending(true);
@@ -380,15 +400,14 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     </UniversalCard>,
     backup: <UniversalCard title="Backup" {...cardProps("backup", "settings-backup-card")}>
       <div className="settings-groups backup-content">
-        <section className="settings-group"><h3>System snapshot</h3><p>Snapshots contain sessions, settings, Undo history and the Access Key verifier. Service tokens remain on the target machine. Restore signs out every session.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
-        <section className="settings-group"><h3>Restore snapshot</h3><p>Validation completes before replacement begins. A pre-restore transaction protects the current timeline.</p><button type="button" className="settings-action" onClick={() => setRestoreOpen(true)} data-smart-hover>Browse local snapshot archive</button></section>
+        <section className="settings-group"><h3>Manual snapshot</h3><p>Snapshots contain sessions, settings, Undo history and the Access Key verifier. Service tokens remain on the target machine. Restore signs out every session.</p><button type="button" className="settings-action" onClick={async () => { try { const name = await downloadFile("/api/backup/export"); notify("success", `${name} created and downloaded.`); } catch (error) { notify("error", error instanceof Error ? error.message : "Snapshot could not be created."); } }} data-smart-hover>Create and download snapshot</button></section>
         <section className="settings-group backup-neptune-group"><h3>Automatic backup to Saturn</h3><p>Neptune exports the same ZIP as the manual action and uploads it without changing its bytes.</p>
-          <div className="service-status-row"><span>Local Neptune agent:</span><span>{!neptune ? "Checking" : neptune.state === "linked" ? "Linked" : neptune.state === "unlinked" ? "Not linked" : neptune.state === "authorization_failed" ? "Authorization failed" : neptune.linked ? "Unavailable · last known linked" : "Unavailable · installation unknown"}</span><StatusSquare state={neptune?.state === "linked" ? "success" : "danger"} /></div>
-          <button type="button" className="settings-action" onClick={() => initializeAgent()}>Initialize</button>
+          <div className="service-status-row"><span>Local Neptune agent:</span><span>{!neptune ? "Checking" : neptune.state === "linked" ? "Linked" : neptune.state === "unlinking" ? "Unlinking" : neptune.state === "unlinked" ? "Not linked" : neptune.state === "authorization_failed" ? "Authorization failed" : neptune.linked ? "Unavailable · last known linked" : "Unavailable · installation unknown"}</span><StatusSquare state={neptune?.state === "linked" ? "success" : "danger"} /></div>
           <BackupPolicyPanel service="chronos" base="/api/neptune/policy" headers={policyHeaders} />
+          {neptune?.state === "linked" || neptune?.linked === true ? <button type="button" className="settings-action backup-unlink-action" disabled={neptuneUnlinking || !["linked", "unlinking"].includes(neptune?.state ?? "")} onClick={() => void unlinkNeptune()}>{neptuneUnlinking ? "Unlinking Neptune…" : neptune?.state === "unlinking" ? "Retry Neptune unlink" : "Unlink Neptune agent"}</button>
+            : <button type="button" className="settings-action backup-link-action" disabled={!neptune || neptune.state === "unavailable" && neptune.linked !== false} onClick={() => initializeAgent()}>{neptune?.state === "authorization_failed" ? "Repair Neptune connection" : "Link Neptune agent"}</button>}
           </section>
-      <section className="settings-group"><h3>Neptune version</h3><p>Current installed version: {neptune?.version ?? "Unavailable"}</p><button type="button" className="settings-action" onClick={() => openChronosUpdates("neptune")}>Check Neptune for updates</button>
-        </section>
+        <section className="settings-group"><h3>Restore snapshot</h3><p>Validation completes before replacement begins. A pre-restore transaction protects the current timeline.</p><button type="button" className="settings-action" onClick={() => setRestoreOpen(true)} data-smart-hover>Browse local snapshot archive</button></section>
       </div>
     </UniversalCard>,
     gryphon: <UniversalCard title="Gryphon Connection" {...cardProps("gryphon", "settings-bot-card")}>

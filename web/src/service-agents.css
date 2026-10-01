@@ -46,3 +46,14 @@
 @media(max-width:420px) { :root .exo-agent-status { align-items:flex-start; flex-direction:column; } }
 @media(pointer:coarse) { :root .exo-policy-toggle,:root .exo-policy-interval input,:root :is(.exo-backup-policy,.exo-wyvern-connection) button { min-height:44px; } }
 @media(prefers-reduced-motion:reduce) { :root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-service-logs) :is(button,a[download]) { transition:none; } :root :is(.exo-backup-policy,.exo-wyvern-connection,.exo-service-logs) :is(button,a[download]):is(:hover,:focus-visible,:active) { transform:none; } }
+/* Backup card reference: pipeline rows precede the single schedule control. */
+:root .exo-backup-policy .exo-policy-statuses { display:grid; gap:10px; }
+:root .exo-backup-policy .exo-policy-statuses [hidden] { display:none; }
+:root .exo-backup-policy .exo-policy-status strong { text-align:right; overflow-wrap:anywhere; }
+:root .exo-backup-policy .exo-agent-group,
+:root .exo-backup-policy .exo-agent-group + .exo-agent-group { margin-top:0; }
+:root .exo-backup-policy .exo-policy-controls { grid-template-columns:minmax(0,1fr); gap:8px; }
+:root .exo-backup-policy .exo-policy-toggle { min-height:24px; }
+:root .exo-backup-policy .exo-policy-interval { display:flex; align-items:center; gap:12px; }
+:root .exo-backup-policy .exo-policy-interval input { width:57px; min-width:57px; height:28px; min-height:28px; }
+@media(pointer:coarse) { :root .exo-backup-policy .exo-policy-toggle, :root .exo-backup-policy .exo-policy-interval input { min-height:44px; } }

@@ -77,7 +77,8 @@ class NeptuneClient:
             return {"installed": None, "linked": None, **self.last_known, "state": "unavailable", "error": str(error)}
         try:
             status = await self.status()
-            self.last_known = {**status, "installed": True, "linked": True, "state": "linked"}
+            self.last_known = {**status, "installed": True, "linked": True,
+                               "state": "unlinking" if status.get("project", {}).get("unlinking") else "linked"}
             return self.last_known
         except NeptuneError as error:
             upstream = getattr(error, "upstream_status", None)

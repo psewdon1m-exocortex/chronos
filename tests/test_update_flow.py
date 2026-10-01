@@ -81,8 +81,10 @@ def test_single_standard_zip_saved_copy_gate_and_component_jobs():
         assert base64.b64decode(payload["backup"]["data_base64"]) == archive
         assert client.post("/api/update-flow/check", json={"component": "gryphon"}).status_code == 400
         assert client.post("/api/update-flow/check", json={"component": "updater"}).status_code == 403
+        assert client.post("/api/update-flow/check", json={"component": "neptune"}).status_code == 403
         assert client.post("/api/update-flow/install/gryphon", json={"version": "0.1.4", "request_id": "01234567-0123-4123-8123-012345678901"}).status_code == 400
         assert client.post("/api/update-flow/install/updater", json={"version": "0.1.4", "request_id": "01234567-0123-4123-8123-012345678901"}).status_code == 403
+        assert client.post("/api/update-flow/install/neptune", json={"version": "0.1.4", "request_id": "01234567-0123-4123-8123-012345678901"}).status_code == 403
         assert len(created) == 1
         assert len(submitted) == 1
         try:

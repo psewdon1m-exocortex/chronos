@@ -206,7 +206,7 @@ export const DOCUMENTATION_ARTICLES: DocumentationArticle[] = [
         <h2>What a backup contains</h2>
         <p>The archive contains Chronos data and settings, the Access Key verifier and retained command/Undo state. Plaintext keys, service tokens and Gryphon-owned identity data are excluded.</p>
         <h2>Manual and scheduled backups</h2>
-        <p>Use Settings to create and download an archive. Neptune reports storage reachability and the latest stored backup. Saturn owns the backup schedule and its next due time.</p>
+        <p>Use Settings to create and download an archive and control automatic backups. Neptune reports storage reachability and the latest stored backup. Saturn stores the service-owned schedule and its next due time.</p>
         <h2>Restore</h2>
         <p>Inspect the archive metadata before confirming. Restore replaces Chronos application data, signs out browser sessions and retains the target machine’s Kernel enrollment.</p>
         <div className="documentation-note">A process marked running is not proof of a usable backup. Check storage reachability, the latest successful archive and a real restore drill separately.</div>

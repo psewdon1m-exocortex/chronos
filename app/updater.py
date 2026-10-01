@@ -124,20 +124,6 @@ class UpdaterClient:
             self._request, "POST", "/v1/updates", body, True, 30
         )
 
-    async def update_neptune(self, version: str) -> dict[str, Any]:
-        return await asyncio.to_thread(
-            self._request,
-            "POST",
-            "/v1/components/neptune-linux/update",
-            {"head_id": self.head_id, "version": version},
-            True,
-            300,
-        )
-
-    async def check_neptune(self, current_version: str) -> dict[str, Any]:
-        return await asyncio.to_thread(self._request, "POST", "/v1/components/neptune-linux/check",
-            {"head_id": self.head_id, "current_version": current_version}, True, 30)
-
     async def initialize_neptune(self, enrollment_code: str, export_url: str, request_id: str | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._request,
@@ -152,6 +138,13 @@ class UpdaterClient:
             },
             True,
             30,
+        )
+
+    async def unlink_neptune(self, request_id: str | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._request, "POST", "/v1/components/neptune-linux/unlink",
+            {"request_id": request_id or str(uuid4()), "head_id": self.head_id, "project_id": "chronos"},
+            True, 30,
         )
 
     async def job(self, job_id: str) -> dict[str, Any]:
