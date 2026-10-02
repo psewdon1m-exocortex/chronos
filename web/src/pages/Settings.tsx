@@ -415,7 +415,7 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
           {!accentReadable(accentDraft) && <p className="inline-error">Use a valid #RRGGBB color with readable contrast on black.</p>}
         </section>
         <section className="settings-group"><h3>Left menu position</h3><p>Reveal the Sidebar from the edge or keep it fixed on wide screens.</p>
-          <label className="toggle-control"><input type="checkbox" checked={values.sidebar_auto_hide} onChange={(event) => void commit({ sidebar_auto_hide: event.target.checked }, "Sidebar mode saved.")} /><span>Auto open and hide sidebar on mouse hover</span></label>
+          <label className="toggle-control dot-toggle-control"><input type="checkbox" checked={values.sidebar_auto_hide} onChange={(event) => void commit({ sidebar_auto_hide: event.target.checked }, "Sidebar mode saved.")} /><span>Auto open and hide sidebar on mouse hover</span></label>
         </section>
       </div>
     </UniversalCard>,
@@ -477,16 +477,16 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         <label><span>Daily summary time</span><input type="time" value={values.daily_summary_time} disabled={!values.daily_summary_enabled} onChange={(event) => setValues({ ...values, daily_summary_time: event.target.value })} onBlur={() => data.values.daily_summary_time !== values.daily_summary_time && void commit({ daily_summary_time: values.daily_summary_time })} /></label>
         <label className="toggle-control"><input type="checkbox" checked={values.daily_summary_enabled} onChange={(event) => void commit({ daily_summary_enabled: event.target.checked })} /><span>Send the daily balance through Gryphon</span></label>
       </div>
-      <section className="settings-group monthly-report-settings">
+      <div className="settings-groups monthly-report-groups"><section className="settings-group monthly-report-settings">
         <h3>Monthly report to Mastermind</h3>
-        <p>Chronos reads a Markdown template from Mastermind after the month closes. The template contains the @note link to the graph branch; each report becomes a separate note in the Vault root.</p>
-        <label><span>Template path in Mastermind</span><input value={values.monthly_report_template_path} placeholder="root/templates/chronos_note.md" maxLength={240} onChange={(event) => { setValues({ ...values, monthly_report_template_path: event.target.value }); setMonthlyTemplate(null); }} /></label>
-        <div className="form-actions"><button type="button" disabled={monthlyPending || !values.monthly_report_template_path} onClick={() => void checkMonthlyTemplate()}>Check template</button><button type="button" disabled={monthlyPending || data.values.monthly_report_template_path === values.monthly_report_template_path} onClick={() => void commit({ monthly_report_template_path: values.monthly_report_template_path })}>Save template path</button></div>
+        <p className="monthly-report-description">Chronos reads a Markdown template from Mastermind after the month closes. The template contains the @note link to the graph branch; each report becomes a separate note in the Vault root.</p>
+        <label className="monthly-report-path"><span>Template path in Mastermind</span><input value={values.monthly_report_template_path} placeholder="root/templates/chronos_note.md" maxLength={240} onChange={(event) => { setValues({ ...values, monthly_report_template_path: event.target.value }); setMonthlyTemplate(null); }} /></label>
+        <div className="form-actions monthly-report-actions"><button type="button" disabled={monthlyPending || !values.monthly_report_template_path} onClick={() => void checkMonthlyTemplate()}>Check template</button><button type="button" disabled={monthlyPending || data.values.monthly_report_template_path === values.monthly_report_template_path} onClick={() => void commit({ monthly_report_template_path: values.monthly_report_template_path })}>Save template path</button></div>
         {monthlyTemplate?.path === values.monthly_report_template_path && <p className="form-hint">Linked branch: {monthlyTemplate.anchor}</p>}
-        <label className="toggle-control"><input type="checkbox" checked={values.monthly_report_enabled} disabled={monthlyPending || data.values.monthly_report_template_path !== values.monthly_report_template_path} onChange={(event) => void commit({ monthly_report_enabled: event.target.checked })} /><span>Send a report after each calendar month</span></label>
+        <label className="toggle-control dot-toggle-control"><input type="checkbox" checked={values.monthly_report_enabled} disabled={monthlyPending || data.values.monthly_report_template_path !== values.monthly_report_template_path} onChange={(event) => void commit({ monthly_report_enabled: event.target.checked })} /><span>Send a report after each calendar month</span></label>
         {monthlyStatus?.reports[0] && <p className="form-hint">Latest: {monthlyStatus.reports[0].month} · {monthlyStatus.reports[0].state}{monthlyStatus.reports[0].mastermind_path ? ` · ${monthlyStatus.reports[0].mastermind_path}` : ""}{monthlyStatus.reports[0].last_error ? ` · ${monthlyStatus.reports[0].last_error}` : ""}</p>}
-        <button type="button" disabled={monthlyPending || !values.monthly_report_enabled} onClick={() => void runMonthlyReport()}>Process or retry pending report</button>
-      </section>
+        <button type="button" className="settings-action monthly-report-run" disabled={monthlyPending || !values.monthly_report_enabled} onClick={() => void runMonthlyReport()}>Process or retry pending report</button>
+      </section></div>
     </UniversalCard>,
   };
 
