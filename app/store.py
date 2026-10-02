@@ -510,6 +510,7 @@ class Store:
                 owner = await self.owner(connection)
                 await connection.execute("select pg_advisory_xact_lock($1)", owner["id"])
                 await connection.execute("delete from undo_actions where user_id=$1", owner["id"])
+                await connection.execute("delete from monthly_reports")
                 await connection.execute(
                     "delete from time_sessions where user_id = $1", owner["id"]
                 )

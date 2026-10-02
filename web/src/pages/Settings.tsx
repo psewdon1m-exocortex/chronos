@@ -48,6 +48,11 @@ interface GryphonBot {
 }
 
 interface NeptuneAvailability { installed: boolean | null; linked: boolean | null; state: "linked" | "unlinking" | "unlinked" | "unavailable" | "authorization_failed"; version?: string | null }
+interface MonthlyReportStatus {
+  enabled: boolean;
+  template_path: string;
+  reports: Array<{ month: string; state: string; attempts: number; last_error: string; mastermind_path: string | null; delivered_at: string | null }>;
+}
 
 const FALLBACK_ZONES = ["UTC", "Europe/Istanbul", "Europe/Moscow", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Tokyo"];
 
@@ -100,6 +105,9 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState("");
   const [neptune, setNeptune] = useState<NeptuneAvailability | null>(null);
+  const [monthlyStatus, setMonthlyStatus] = useState<MonthlyReportStatus | null>(null);
+  const [monthlyTemplate, setMonthlyTemplate] = useState<{ path: string; sha256: string; anchor: string } | null>(null);
+  const [monthlyPending, setMonthlyPending] = useState(false);
   const [neptuneUnlinking, setNeptuneUnlinking] = useState(false);
   const [gryphon, setGryphon] = useState<GryphonStatus | null>(null);
   const [gryphonBots, setGryphonBots] = useState<GryphonBot[]>([]);
@@ -136,6 +144,32 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
     catch { setNeptune(previous => ({ installed: null, linked: null, ...previous, state: "unavailable" })); }
   }, []);
   useEffect(() => { void loadNeptune(); const timer = setInterval(() => void loadNeptune(), 15000); return () => clearInterval(timer); }, [loadNeptune]);
+  const loadMonthly = useCallback(async () => {
+    try { setMonthlyStatus(await api<MonthlyReportStatus>("/api/monthly-reports/status")); }
+    catch { /* Settings remain editable while the status endpoint is unavailable. */ }
+  }, []);
+  useEffect(() => { void loadMonthly(); const timer = setInterval(() => void loadMonthly(), 30000); return () => clearInterval(timer); }, [loadMonthly]);
+  const checkMonthlyTemplate = async () => {
+    if (!values?.monthly_report_template_path) return;
+    setMonthlyPending(true);
+    try {
+      const result = await api<{ path: string; sha256: string; anchor: string }>(`/api/monthly-reports/template?path=${encodeURIComponent(values.monthly_report_template_path)}`);
+      setMonthlyTemplate(result);
+      notify("success", `Template found; report branch: ${result.anchor}.`);
+    } catch (error) {
+      setMonthlyTemplate(null);
+      notify("error", error instanceof Error ? error.message : "Mastermind template could not be checked.");
+    } finally { setMonthlyPending(false); }
+  };
+  const runMonthlyReport = async () => {
+    setMonthlyPending(true);
+    try {
+      setMonthlyStatus(await api<MonthlyReportStatus>("/api/monthly-reports/run", { method: "POST" }));
+      notify("success", "Pending monthly reports were checked for delivery.");
+    } catch (error) {
+      notify("error", error instanceof Error ? error.message : "Monthly report could not be started.");
+    } finally { setMonthlyPending(false); }
+  };
   const loadGryphon = useCallback(async () => {
     try {
       const status = await api<GryphonStatus>("/api/gryphon/status");
@@ -443,6 +477,16 @@ export default function Settings({ settings, onSettingsChanged }: { settings?: S
         <label><span>Daily summary time</span><input type="time" value={values.daily_summary_time} disabled={!values.daily_summary_enabled} onChange={(event) => setValues({ ...values, daily_summary_time: event.target.value })} onBlur={() => data.values.daily_summary_time !== values.daily_summary_time && void commit({ daily_summary_time: values.daily_summary_time })} /></label>
         <label className="toggle-control"><input type="checkbox" checked={values.daily_summary_enabled} onChange={(event) => void commit({ daily_summary_enabled: event.target.checked })} /><span>Send the daily balance through Gryphon</span></label>
       </div>
+      <section className="settings-group monthly-report-settings">
+        <h3>Monthly report to Mastermind</h3>
+        <p>Chronos reads a Markdown template from Mastermind after the month closes. The template contains the @note link to the graph branch; each report becomes a separate note in the Vault root.</p>
+        <label><span>Template path in Mastermind</span><input value={values.monthly_report_template_path} placeholder="root/templates/chronos_note.md" maxLength={240} onChange={(event) => { setValues({ ...values, monthly_report_template_path: event.target.value }); setMonthlyTemplate(null); }} /></label>
+        <div className="form-actions"><button type="button" disabled={monthlyPending || !values.monthly_report_template_path} onClick={() => void checkMonthlyTemplate()}>Check template</button><button type="button" disabled={monthlyPending || data.values.monthly_report_template_path === values.monthly_report_template_path} onClick={() => void commit({ monthly_report_template_path: values.monthly_report_template_path })}>Save template path</button></div>
+        {monthlyTemplate?.path === values.monthly_report_template_path && <p className="form-hint">Linked branch: {monthlyTemplate.anchor}</p>}
+        <label className="toggle-control"><input type="checkbox" checked={values.monthly_report_enabled} disabled={monthlyPending || data.values.monthly_report_template_path !== values.monthly_report_template_path} onChange={(event) => void commit({ monthly_report_enabled: event.target.checked })} /><span>Send a report after each calendar month</span></label>
+        {monthlyStatus?.reports[0] && <p className="form-hint">Latest: {monthlyStatus.reports[0].month} · {monthlyStatus.reports[0].state}{monthlyStatus.reports[0].mastermind_path ? ` · ${monthlyStatus.reports[0].mastermind_path}` : ""}{monthlyStatus.reports[0].last_error ? ` · ${monthlyStatus.reports[0].last_error}` : ""}</p>}
+        <button type="button" disabled={monthlyPending || !values.monthly_report_enabled} onClick={() => void runMonthlyReport()}>Process or retry pending report</button>
+      </section>
     </UniversalCard>,
   };
 

@@ -166,6 +166,14 @@ invalid.
 
 Chronos requires the additive typed profile in [app/deployment-profile.json](app/deployment-profile.json). All values use numeric Volt field references and are resolved only through Kernel. Required bindings and the operator sequence are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
+## Monthly reports to Mastermind
+
+Enable monthly reports in Chronos Settings and select a Markdown template under `root/templates/` in the Mastermind Vault. For example, put [the sample template](docs/examples/chronos-monthly-template.md) at `root/templates/chronos_note.md`; its literal `@chronos_analytics` link points to an existing branch note. Each completed calendar month produces a separate `Chronos YYYY-MM.md` note in the Vault root. [The sample report](docs/examples/chronos-monthly-report-2026-09.md) uses invented data to show the resulting layout.
+
+Chronos uses its configured timezone for midnight boundaries, including sessions crossing a day or month boundary. `Etc/GMT+3` means UTC−3; use `Europe/Istanbul` for Istanbul time. On first enablement Chronos queues the most recently completed month. The durable queue retries failed deliveries, and Settings shows its state and offers a manual retry. Reports already delivered remain immutable.
+
+Chronos resolves `services.mastermind.sni`, `services.mastermind.port`, and `services.mastermind.secrets.chronos_report_token` through Kernel when reading the template and sending the report. The token is a dedicated report capability shared with Mastermind Core through its own Kernel binding, not the existing event reader token. Configure TLS trust for the Mastermind hostname through the system trust store or `SSL_CERT_FILE`.
+
 ## Updater contract
 
 - GET /api/updates/status and POST /api/updates/check.

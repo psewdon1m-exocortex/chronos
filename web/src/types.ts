@@ -69,6 +69,9 @@ export interface SettingsValues {
   reminder_minutes: number;
   daily_summary_enabled: boolean;
   daily_summary_time: string;
+  monthly_report_enabled: boolean;
+  monthly_report_template_path: string;
+  monthly_report_since: string;
   theme_accent: string;
   sidebar_auto_hide: boolean;
   navigation_order: Array<"dashboard" | "timeline" | "analytics" | "settings">;

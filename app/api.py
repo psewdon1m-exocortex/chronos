@@ -39,6 +39,7 @@ from .kernel_register import KernelRegisterError, apply_register, load_snapshot,
 from .backup_policy import BackupPolicy
 from .neptune import NeptuneClient, NeptuneError
 from .mastermind_reader import install_mastermind_reader
+from .monthly_reports import MastermindReportError, MonthlyReportSupervisor, _last_completed_month
 from .runtime import RuntimeState
 from .security import (
     create_session_token,
@@ -408,12 +409,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         gryphon,
         GryphonNotifier(gryphon_client),
     )
+    monthly_reports = MonthlyReportSupervisor(store, timers, runtime)
     app.state.pool = pool
     app.state.store = store
     app.state.runtime = runtime
     app.state.timers = timers
     app.state.gryphon = gryphon
     app.state.gryphon_client = gryphon_client
+    app.state.monthly_reports = monthly_reports
     app.state.telemetry = TelemetrySampler(config.storage_path or config.data_dir)
     app.state.updater = UpdaterClient(
         config.updater_socket_path, config.updater_control_token, config.updater_head_id
@@ -426,6 +429,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     notification_task = asyncio.create_task(
         notifications.run(), name="gryphon-notification-supervisor"
     )
+    monthly_task = asyncio.create_task(monthly_reports.run(), name="monthly-report-supervisor")
     catalog_task = asyncio.create_task(
         gryphon_client.maintain_command_catalog(), name="gryphon-command-catalog"
     )
@@ -435,8 +439,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         register_task.cancel()
         await notifications.stop()
         notification_task.cancel()
+        await monthly_reports.stop()
+        monthly_task.cancel()
         catalog_task.cancel()
-        for task in (register_task, notification_task, catalog_task):
+        for task in (register_task, notification_task, monthly_task, catalog_task):
             with suppress(asyncio.CancelledError):
                 await task
         await pool.close()
@@ -732,6 +738,23 @@ def create_app() -> FastAPI:
         )
         return await request.app.state.timers.analytics(*period)
 
+    @app.get("/api/monthly-reports/status")
+    async def monthly_report_status(request: Request, _: dict[str, Any] = Depends(operator)):
+        return await request.app.state.monthly_reports.status()
+
+    @app.get("/api/monthly-reports/template")
+    async def monthly_report_template(request: Request, path: str, _: dict[str, Any] = Depends(operator)):
+        try:
+            value = await request.app.state.monthly_reports.client.template(path)
+        except MastermindReportError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        return {key: value[key] for key in ("path", "sha256", "anchor")}
+
+    @app.post("/api/monthly-reports/run")
+    async def run_monthly_report(request: Request, _: dict[str, Any] = Depends(mutation_operator)):
+        await request.app.state.monthly_reports.run_once(force_retry=True)
+        return await request.app.state.monthly_reports.status()
+
     @app.get("/api/export.csv")
     async def export_csv(request: Request, _: dict[str, Any] = Depends(operator)):
         rows = await request.app.state.store.sessions_for_export()
@@ -795,6 +818,22 @@ def create_app() -> FastAPI:
         _: dict[str, Any] = Depends(mutation_operator),
     ):
         changed = _validate_settings(body)
+        if "monthly_report_since" in changed:
+            raise HTTPException(status_code=422, detail="Monthly report start month is managed by Chronos")
+        previous = await request.app.state.store.settings()
+        candidate = {**previous, **changed}
+        if candidate["monthly_report_enabled"] and not candidate["monthly_report_template_path"]:
+            raise HTTPException(status_code=422, detail="Select a Mastermind template before enabling reports")
+        if candidate["monthly_report_enabled"] and (changed.get("monthly_report_enabled") is True
+                                                    or "monthly_report_template_path" in changed):
+            try:
+                await request.app.state.monthly_reports.client.template(candidate["monthly_report_template_path"])
+            except MastermindReportError as error:
+                status = 422 if error.code in {"REPORT_TEMPLATE_INVALID", "REPORT_LINK_INVALID", "NOT_FOUND"} else 503
+                raise HTTPException(status_code=status, detail=str(error)) from None
+        if changed.get("monthly_report_enabled") is True and not previous["monthly_report_enabled"]:
+            zone = timezone_for(str(candidate["timezone"]))
+            changed["monthly_report_since"] = _last_completed_month(zone).strftime("%Y-%m")
         values = await request.app.state.store.update_settings(changed)
         await request.app.state.store.audit(
             status="success",

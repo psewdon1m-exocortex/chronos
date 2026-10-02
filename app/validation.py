@@ -20,6 +20,9 @@ class SettingsInput(BaseModel):
     reminder_minutes: int | None = Field(default=None, ge=0, le=10080)
     daily_summary_enabled: bool | None = None
     daily_summary_time: str | None = None
+    monthly_report_enabled: bool | None = None
+    monthly_report_template_path: str | None = Field(default=None, max_length=240)
+    monthly_report_since: str | None = None
     theme_accent: str | None = None
     sidebar_auto_hide: bool | None = None
     navigation_order: list[str] | None = None
@@ -38,6 +41,16 @@ def validate_settings(data: dict[str, Any] | SettingsInput) -> dict[str, Any]:
             ZoneInfo(values["timezone"])
         except (ZoneInfoNotFoundError, ValueError) as error:
             raise ValueError("Unknown timezone") from error
+    if "monthly_report_template_path" in values:
+        path = values["monthly_report_template_path"]
+        parts = path.split("/")
+        if path and (not path.startswith("root/templates/") or not path.endswith(".md")
+                     or any(part in {"", ".", ".."} or part.startswith(".") or "\\" in part
+                            for part in parts)):
+            raise ValueError("Select a Markdown template under root/templates")
+    if "monthly_report_since" in values and values["monthly_report_since"] \
+            and not re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", values["monthly_report_since"]):
+        raise ValueError("Invalid monthly report start month")
     for key, allowed in {"time_format": {"12h", "24h"}, "date_format": {"DD.MM.YYYY", "YYYY-MM-DD", "MM/DD/YYYY"}}.items():
         if key in values and values[key] not in allowed:
             raise ValueError(f"Unsupported {key}")
